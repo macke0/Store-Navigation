@@ -14,7 +14,8 @@ import sys
 
 # 7B passar på 24GB VRAM med bra marginal
 # Byt till "Qwen/Qwen2.5-VL-72B-Instruct" för högre precision (kräver mer VRAM)
-MODELL      = "Qwen/Qwen2.5-VL-7B-Instruct"
+# Ändra i start_vllm.py
+MODELL = "Qwen/Qwen2.5-VL-32B-Instruct-AWQ"
 PORT        = 8001
 GPU_MEMORY  = 0.90    # använd 90% av VRAM
 

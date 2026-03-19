@@ -12,58 +12,32 @@ Kör:
     python scanner.py IMG_5432.jpeg --dry-run
     python scanner.py IMG_5432.jpeg --rader 6 --kolumner 6
 """
-
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+from core.identifiera import identifiera_produkt as ai_identifiera
 import os
 import sys
 import json
 import argparse
-import base64
 import concurrent.futures
-import requests
 import anthropic
 import cv2
+import requests
 import numpy as np
-from produktdb import slå_upp_produkt
 
 # ─────────────────────────────────────────────
 # KONFIGURATION
 # ─────────────────────────────────────────────
 SERVER_URL      = "http://127.0.0.1:8000/produkt/"
-VLLM_URL        = "http://127.0.0.1:8001/v1/chat/completions"
-MODELL          = "Qwen/Qwen2.5-VL-7B-Instruct"   # byt till 72B om du har VRAM
 MAX_WORKERS     = 16      # antal parallella Qwen-anrop
 RADER           = 8      # rutnätets höjd
 KOLUMNER        = 8      # rutnätets bredd
-MIN_CONF        = 0.0    # alla rutor skickas till Qwen
 
 
 # ─────────────────────────────────────────────
 # INITIERING
 # ─────────────────────────────────────────────
 print("🚀 Puls-AR Scanner v8 startar...")
-
-# Kolla om vLLM körs
-vllm_tillgänglig = False
-try:
-    r = requests.get("http://127.0.0.1:8001/health", timeout=2)
-    if r.status_code == 200:
-        vllm_tillgänglig = True
-        print("   ✅ vLLM online")
-except Exception:
-    pass
-
-# Fallback till Ollama om vLLM inte körs
-if not vllm_tillgänglig:
-    print("   ⚠️  vLLM inte igång — faller tillbaka på Ollama")
-    print("   💡 Starta vLLM med: python start_vllm.py")
-    OLLAMA_URL   = "http://127.0.0.1:11434/api/generate"
-    OLLAMA_MODELL = "qwen2.5vl"
-    try:
-        requests.get("http://127.0.0.1:11434", timeout=2)
-        print("   ✅ Ollama online (fallback)")
-    except Exception:
-        print("   ❌ Varken vLLM eller Ollama svarar!")
-        sys.exit(1)
 
 claude = anthropic.Anthropic()
 print("   ✅ Claude API redo\n")
@@ -110,119 +84,47 @@ def dela_i_rutnät(img: np.ndarray, rader: int, kolumner: int) -> list[tuple]:
 
     return boxar
 
-
-# ─────────────────────────────────────────────
-# QWEN VIA vLLM  (snabb, parallell)
-# ─────────────────────────────────────────────
-
-def img_till_base64(img_array: np.ndarray) -> str:
-    # Skala ner till max 512px för snabbare inference
-    h, w = img_array.shape[:2]
-    if max(h, w) > 512:
-        skala      = 512 / max(h, w)
-        img_array  = cv2.resize(img_array, (int(w*skala), int(h*skala)))
-    _, buf = cv2.imencode(".jpg", img_array, [cv2.IMWRITE_JPEG_QUALITY, 85])
-    return base64.b64encode(buf).decode("utf-8")
-
-def fråga_qwen_vllm(crop: np.ndarray, ruta_index: int) -> str | None:
-    """Anropar vLLM med OpenAI-kompatibelt API."""
-    b64 = img_till_base64(crop)
-
-    payload = {
-        "model": MODELL,
-        "messages": [{
-            "role": "user",
-            "content": [
-                {
-                    "type": "image_url",
-                    "image_url": {"url": f"data:image/jpeg;base64,{b64}"}
-                },
-                {
-                    "type": "text",
-                    "text": (
-                        "This is a section of a Swedish grocery store shelf. "
-                        "What product or products do you see? "
-                        "Reply with ONLY the Swedish product name(s), one per line. "
-                        "Example: 'Felix Dressing Caesar' or 'Tabasco Röd'. "
-                        "If the section is empty or unclear, reply: OKÄND"
-                    )
-                }
-            ]
-        }],
-        "max_tokens": 100,
-        "temperature": 0.1,
-    }
-
-    try:
-        resp = requests.post(VLLM_URL, json=payload, timeout=30)
-        resp.raise_for_status()
-        svar = resp.json()["choices"][0]["message"]["content"].strip()
-        if svar and "OKÄND" not in svar.upper():
-            return svar
-    except Exception as e:
-        print(f"   ⚠️  vLLM-fel (ruta {ruta_index}): {e}")
-
-    return None
-
-def fråga_qwen_ollama(crop: np.ndarray, ruta_index: int) -> str | None:
-    """Fallback till Ollama om vLLM inte körs."""
-    b64 = img_till_base64(crop)
-    payload = {
-        "model":   OLLAMA_MODELL,
-        "prompt":  (
-            "This is a section of a Swedish grocery store shelf. "
-            "What product do you see? Reply with ONLY the Swedish product name. "
-            "Example: 'Felix Dressing Caesar'. If unclear, reply: OKÄND"
-        ),
-        "images":  [b64],
-        "stream":  False,
-        "options": {"temperature": 0.1},
-    }
-    try:
-        resp = requests.post(OLLAMA_URL, json=payload, timeout=60)
-        resp.raise_for_status()
-        svar = resp.json().get("response", "").strip()
-        if svar and "OKÄND" not in svar.upper() and len(svar) < 100:
-            return svar
-    except Exception as e:
-        print(f"   ⚠️  Ollama-fel (ruta {ruta_index}): {e}")
-    return None
-
-def fråga_qwen(crop: np.ndarray, ruta_index: int) -> str | None:
-    """Väljer vLLM eller Ollama automatiskt."""
-    if vllm_tillgänglig:
-        return fråga_qwen_vllm(crop, ruta_index)
-    return fråga_qwen_ollama(crop, ruta_index)
-
-
 # ─────────────────────────────────────────────
 # PARALLELL INFERENCE
 # ─────────────────────────────────────────────
 
 def analysera_ruta(args: tuple) -> dict | None:
-    """Analyserar en enskild ruta — körs parallellt."""
     i, box, img = args
     x1, y1, x2, y2 = box
-
     crop = img[y1:y2, x1:x2]
     if crop.size == 0:
         return None
 
-    svar = fråga_qwen(crop, i)
-    if not svar:
-        return None
+    # Bildförbättring
+    crop = förbehandla_ruta(crop)
 
-    # Hantera flera produkter per ruta (en per rad)
-    produktnamn = svar.split("\n")[0].strip()   # ta första raden
-    if not produktnamn or len(produktnamn) < 2:
+    # Kör Qwen + CLIP
+    produkt = ai_identifiera(crop, ruta_nr=i)
+    if not produkt:
         return None
 
     return {
         "ruta":      i,
         "box":       box,
-        "qwen_svar": produktnamn,
+        "qwen_svar": produkt["qwen_svar"],
+        "kanoniskt": produkt["visningsnamn"],
+        "säkerhet":  produkt["säkerhet"],
+        "clip_likhet": produkt["clip_likhet"],
+        "varumarke": produkt["varumarke"],
+        "kategori":  produkt["kategori"],
     }
 
+def förbehandla_ruta(img: np.ndarray) -> np.ndarray:
+    """Bildförbättring för en enskild ruta."""
+    lab     = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+    l, a, b = cv2.split(lab)
+    clahe   = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
+    l       = clahe.apply(l)
+    img     = cv2.cvtColor(cv2.merge((l, a, b)), cv2.COLOR_LAB2BGR)
+    gaussian = cv2.GaussianBlur(img, (0, 0), sigmaX=2.0)
+    img      = cv2.addWeighted(img, 1.6, gaussian, -0.6, 0)
+    img      = cv2.bilateralFilter(img, d=5, sigmaColor=55, sigmaSpace=55)
+    return img
 
 # ─────────────────────────────────────────────
 # HJÄLPFUNKTIONER
@@ -325,12 +227,11 @@ def skanna_bild(bildpath: str, rader: int, kolumner: int,
         qwen_namn = res["qwen_svar"]
         x1, y1, x2, y2 = res["box"]
 
-        off = slå_upp_produkt(qwen_namn)
-        kanoniskt  = off["kanoniskt_namn"]
-        varumarke  = off["varumarke"]
-        kategori   = off["kategori"]
-        db_taggar  = off.get("taggar", [])
-        prod_id    = slug(kanoniskt)
+        kanoniskt = res["kanoniskt"]
+        varumarke = res["varumarke"]
+        kategori  = res["kategori"]
+        db_taggar = []
+        prod_id   = slug(kanoniskt)
 
         # Om vi redan sparat den här produkten — lägg bara till som alias
         if prod_id in sparade:
@@ -355,7 +256,6 @@ def skanna_bild(bildpath: str, rader: int, kolumner: int,
             "y":              round(cy / bildhöjd,  4),
             "z":              2.5,
             "status":         "I lager",
-            "off_verifierad": off["off_hittad"],
         }
 
         print(f"✅ {kanoniskt:40} @ ({payload['x']:.2f}, {payload['y']:.2f})")
