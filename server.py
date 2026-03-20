@@ -15,13 +15,15 @@ import shutil
 import socket
 import time
 from typing import List
+from fastapi import FastAPI, UploadFile, File, Form, Request
 
 import uvicorn
-from fastapi import FastAPI, UploadFile, File, Form
 from pydantic import BaseModel
 from rapidfuzz import fuzz
 
-from core.scanner import fråga_qwen_vllm, slug
+from core.läs_usdz import extrahera_koordinater
+from core.scanner import slug
+from core.qwen import fråga_qwen_vllm
 from core.sok     import sök_router, sätt_databas, smart_sök
 from core.clip_sok import clip_matcha
 from core.databas  import (spara_produkt as db_spara, hämta_produkt,
@@ -66,8 +68,24 @@ def spara_produkt_endpoint(produkt: Produkt):
     sätt_databas({p["id"]: p for p in hämta_alla_produkter()})
     return {"message": f"Sparad: {produkt.visningsnamn}"}
 
+@app.post("/skanna-struktur/")
+async def skanna_struktur(karta: UploadFile = File(...)):
+    """Tar emot RoomPlan USDZ-karta från iOS."""
+    innehåll = await karta.read()
+    sökväg   = f"/tmp/butik_{int(time.time())}.usdz"
+    with open(sökväg, "wb") as f:
+        f.write(innehåll)
 
+    koordinater = extrahera_koordinater(sökväg)
+    print(f"✅ Karta sparad: {sökväg} ({len(innehåll)/1024:.0f}KB)")
+    print(f"   {len(koordinater['väggar'])} väggar")
+    print(f"   {len(koordinater['objekt'])} objekt")
 
+    return {
+        "message":     "Karta sparad",
+        "fil":         sökväg,
+        "koordinater": koordinater
+    }
 @app.post("/skanna-video/")
 async def skanna_video(
     frames:     List[UploadFile] = File(...),
