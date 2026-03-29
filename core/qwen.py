@@ -31,13 +31,16 @@ def fråga_qwen_vllm(img: np.ndarray, ruta_index: int = 0) -> str | None:
                 {
                     "type": "text",
                     "text": (
-                        "This is a small section of a Swedish grocery store shelf. "
-                        "Look ONLY at what text you can clearly read on product packaging. "
-                        "Reply with the brand name and product name you can ACTUALLY SEE. "
-                        "Do NOT guess or infer products you cannot clearly see. "
-                        "If you cannot clearly read a product name, reply: OKÄND "
-                        "Reply with ONLY the product name, nothing else. "
-                        "Example: 'Felix Vitlökssås' or 'Heinz Garlic Sauce'"
+                        "You are scanning a Swedish grocery store shelf. "
+                        "FIRST: Look for shelf price tags at the bottom of shelves and read the product name from them. "
+                        "SECOND: If no price tag is visible, read the product name from the packaging instead. "
+                        "Reply with ONLY: 'Brand Productname' in Swedish. "
+                        "Rules: "
+                        "1. Always include the brand name "
+                        "2. No markdown, no asterisks, no numbering "
+                        "3. No explanations "
+                        "4. If unclear, reply: OKÄND "
+                        "Examples: 'ICA Kikärtor', 'Gyllenhammars Havregryn', 'Barilla Risoni', 'Felix Vitlökssås'"
                     )
                 }
             ]
