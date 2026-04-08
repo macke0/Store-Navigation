@@ -305,7 +305,7 @@ class ARNavManager: NSObject, ObservableObject, ARSessionDelegate {
     @Published var avstånd: Float = 0.0
     @Published var ärFramme: Bool = false
 
-    let serverURL = "http://192.168.0.166:8000"
+    let serverURL = PulsArConfig.serverURL
     let frammeAvstånd: Float = 2.0  // Meter för att räknas som "framme"
 
     func starta(målProdukt: SökProdukt) {

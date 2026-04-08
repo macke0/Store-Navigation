@@ -15,7 +15,7 @@ class ServerUploader: ObservableObject {
     @Published var klart:         Bool   = false
     @Published var felmeddelande: String = ""
 
-    let serverURL = "http://192.168.0.166:8000"
+    let serverURL = PulsArConfig.serverURL
     
     // Batch-inställningar
     let framesPerBatch = 3
@@ -80,17 +80,24 @@ class ServerUploader: ObservableObject {
                 
                 print("📤 Batch \(batchIndex + 1)/\(totalBatches): \(batchFiler.count) frames, \(batchPunkter.count) punkter")
                 
-                try await skickaBatch(
-                    skanningId: skanningId,
-                    batchIndex: batchIndex,
-                    totalBatches: totalBatches,
-                    filer: batchFiler,
-                    positioner: batchPositioner,
-                    punkter: batchPunkter,
-                    isFirst: isFirst,
-                    isLast: isLast
-                )
-                
+                try autoreleasepool {
+                    try await skickaBatch(
+                        skanningId: skanningId,
+                        batchIndex: batchIndex,
+                        totalBatches: totalBatches,
+                        filer: batchFiler,
+                        positioner: batchPositioner,
+                        punkter: batchPunkter,
+                        isFirst: isFirst,
+                        isLast: isLast
+                    )
+                }
+
+                // Ta bort uppladdade frames från disk direkt
+                for fil in batchFiler {
+                    try? FileManager.default.removeItem(at: fil)
+                }
+
                 // Uppdatera progress
                 progress = Double(batchIndex + 1) / Double(totalBatches)
             }
@@ -107,6 +114,14 @@ class ServerUploader: ObservableObject {
             
             print("✅ Uppladdning klar!")
 
+        } catch let error as URLError where error.code == .timedOut {
+            laddarUpp     = false
+            felmeddelande = "Uppladdningen tog för lång tid. Testa med bättre WiFi-signal."
+            print("❌ Timeout: \(error)")
+        } catch let error as URLError where error.code == .cannotConnectToHost || error.code == .notConnectedToInternet {
+            laddarUpp     = false
+            felmeddelande = "Kan inte nå servern. Kontrollera att backend körs och att du är på rätt nätverk."
+            print("❌ Ingen anslutning: \(error)")
         } catch {
             laddarUpp     = false
             felmeddelande = "Uppladdning misslyckades: \(error.localizedDescription)"
@@ -193,7 +208,7 @@ class ServerUploader: ObservableObject {
         request.httpBody   = body
         request.setValue("multipart/form-data; boundary=\(boundary)",
                          forHTTPHeaderField: "Content-Type")
-        request.timeoutInterval = 120  // 2 min per batch
+        request.timeoutInterval = PulsArConfig.uploadTimeout
 
         let (responseData, response) = try await URLSession.shared.data(for: request)
         

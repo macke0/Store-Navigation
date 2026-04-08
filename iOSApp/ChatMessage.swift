@@ -72,7 +72,7 @@ class ChatService: ObservableObject {
     
     private let baseURL: String
     
-    init(baseURL: String = "http://192.168.0.166:8000") {
+    init(baseURL: String = PulsArConfig.serverURL) {
         self.baseURL = baseURL
     }
     
@@ -99,11 +99,24 @@ class ChatService: ObservableObject {
             )
             messages.append(assistantMessage)
             
-        } catch {
-            // Felmeddelande
+        } catch let error as URLError where error.code == .timedOut {
             let errorMessage = ChatMessage(
                 role: .assistant,
-                content: "Kunde inte ansluta till servern: \(error.localizedDescription)",
+                content: "Servern tog för lång tid att svara. Försök igen om en stund.",
+                timestamp: Date()
+            )
+            messages.append(errorMessage)
+        } catch let error as URLError where error.code == .cannotConnectToHost || error.code == .notConnectedToInternet {
+            let errorMessage = ChatMessage(
+                role: .assistant,
+                content: "Kan inte nå servern. Kontrollera att backend körs och att du är på rätt nätverk.",
+                timestamp: Date()
+            )
+            messages.append(errorMessage)
+        } catch {
+            let errorMessage = ChatMessage(
+                role: .assistant,
+                content: "Något gick fel: \(error.localizedDescription)",
                 timestamp: Date()
             )
             messages.append(errorMessage)

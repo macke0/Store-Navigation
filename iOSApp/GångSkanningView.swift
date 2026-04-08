@@ -55,7 +55,7 @@ struct GångSkanningView: View {
         .onDisappear { manager.stoppa() }
         .onAppear {
             Task {
-                guard let url = URL(string: "http://192.168.0.166:8000/ankarpunkter/") else { return }
+                guard let url = URL(string: "\(PulsArConfig.serverURL)/ankarpunkter/") else { return }
                 do {
                     let (data, _) = try await URLSession.shared.data(from: url)
                     let json      = try JSONSerialization.jsonObject(with: data) as? [String: Any]
@@ -311,9 +311,9 @@ struct Punkt3D: Codable {
     let z: Float          // Världskoordinat Z
     let u: Float          // Pixel-koordinat i bilden
     let v: Float          // Pixel-koordinat i bilden
-    let descriptor: [Float]  // 256-dim feature descriptor
     let frame: Int        // Vilken frame punkten kommer från
     let confidence: Float // LiDAR-konfidens
+    // OBS: descriptor beräknas server-side med SuperPoint, skickas ej från iOS
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -572,7 +572,6 @@ class GångSkanningManager: NSObject, ObservableObject, ARSessionDelegate {
                     z: worldPoint.z + startaOffset.1,
                     u: u_portrait,   // Portrait för SuperPoint-matchning
                     v: v_portrait,
-                    descriptor: [],
                     frame: frameIndex,
                     confidence: Float(confidence) / 2.0
                 )

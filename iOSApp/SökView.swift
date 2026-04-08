@@ -4,6 +4,22 @@ import Combine
 // Alias för bakåtkompatibilitet
 typealias ProduktResultat = SökProdukt
 
+// MARK: - Sökcache (in-memory, lever under app-sessionen)
+/// Sparar sökresultat så att man kan navigera till produkter
+/// även om nätverket tappas efter första sökningen.
+final class SökCache {
+    static let shared = SökCache()
+    private var cache: [String: [SökProdukt]] = [:]
+
+    func spara(query: String, produkter: [SökProdukt]) {
+        cache[query.lowercased().trimmingCharacters(in: .whitespaces)] = produkter
+    }
+
+    func hämta(query: String) -> [SökProdukt]? {
+        cache[query.lowercased().trimmingCharacters(in: .whitespaces)]
+    }
+}
+
 // MARK: - Produktmodell med bild
 struct SökProdukt: Codable, Identifiable {
     let id: String
@@ -109,6 +125,7 @@ struct SökView: View {
     @State private var harSökt = false
     @State private var valdProdukt: SökProdukt? = nil
     @State private var visaARNavigation = false
+    @State private var felmeddelande: String? = nil
     
     let serverURL: String
     
@@ -179,6 +196,23 @@ struct SökView: View {
                         .foregroundColor(.gray)
                 }
                 Spacer()
+            } else if let fel = felmeddelande {
+                Spacer()
+                VStack(spacing: 12) {
+                    Image(systemName: "wifi.exclamationmark")
+                        .font(.system(size: 50))
+                        .foregroundColor(.red)
+                    Text(fel)
+                        .foregroundColor(.red)
+                        .multilineTextAlignment(.center)
+                    Button("Försök igen") {
+                        felmeddelande = nil
+                        Task { await sök() }
+                    }
+                    .buttonStyle(.bordered)
+                }
+                .padding()
+                Spacer()
             } else if produkter.isEmpty && harSökt {
                 Spacer()
                 VStack(spacing: 12) {
@@ -225,25 +259,55 @@ struct SökView: View {
         
         isLoading = true
         harSökt = true
-        
+        felmeddelande = nil
+
         defer { isLoading = false }
-        
+
         guard let encodedQuery = sökText.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
               let url = URL(string: "\(serverURL)/sok?q=\(encodedQuery)") else {
             return
         }
-        
+
         do {
             let (data, _) = try await URLSession.shared.data(from: url)
             let svar = try JSONDecoder().decode(SökSvar.self, from: data)
-            
+
+            // Spara i cache för offline-åtkomst
+            SökCache.shared.spara(query: sökText, produkter: svar.produkter)
+
             await MainActor.run {
                 produkter = svar.produkter
             }
-        } catch {
-            print("Sökfel: \(error)")
+        } catch let error as URLError where error.code == .timedOut {
             await MainActor.run {
-                produkter = []
+                // Försök hämta från cache
+                if let cachade = SökCache.shared.hämta(query: sökText) {
+                    produkter = cachade
+                    felmeddelande = "Visar cachade resultat — servern svarar inte"
+                } else {
+                    felmeddelande = "Servern svarar inte — kontrollera att backend körs"
+                    produkter = []
+                }
+            }
+        } catch let error as URLError where error.code == .cannotConnectToHost || error.code == .notConnectedToInternet {
+            await MainActor.run {
+                if let cachade = SökCache.shared.hämta(query: sökText) {
+                    produkter = cachade
+                    felmeddelande = "Offline — visar cachade resultat"
+                } else {
+                    felmeddelande = "Ingen nätverksanslutning — kontrollera WiFi"
+                    produkter = []
+                }
+            }
+        } catch {
+            await MainActor.run {
+                if let cachade = SökCache.shared.hämta(query: sökText) {
+                    produkter = cachade
+                    felmeddelande = "Visar cachade resultat"
+                } else {
+                    felmeddelande = "Sökningen misslyckades: \(error.localizedDescription)"
+                    produkter = []
+                }
             }
         }
     }
@@ -253,7 +317,7 @@ struct SökView: View {
 struct SökView_Previews: PreviewProvider {
     static var previews: some View {
         NavigationView {
-            SökView(serverURL: "http://192.168.0.166:8000")
+            SökView(serverURL: PulsArConfig.serverURL)
         }
     }
 }

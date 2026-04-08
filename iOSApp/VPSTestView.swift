@@ -254,7 +254,7 @@ class VPSTester: NSObject, ObservableObject, ARSessionDelegate {
     @Published var statusText = "Startar..."
     @Published var markeradPosition: SIMD3<Float> = .zero
     
-    let serverURL = "http://192.168.0.166:8000"
+    let serverURL = PulsArConfig.serverURL
     
     // ─────────────────────────────────────────────
     // BERÄKNADE EGENSKAPER

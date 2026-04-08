@@ -142,12 +142,22 @@ struct KartläggView: View {
                     .foregroundColor(.white)
                     .frame(maxWidth: .infinity)
                     .padding()
-                    .background(manager.sparad ? Color.green : Color.blue)
+                    .background(manager.sparFel != nil ? Color.red :
+                                manager.sparad ? Color.green : Color.blue)
                     .cornerRadius(14)
                     .padding(.horizontal)
                 }
-                .padding(.bottom, 40)
+                .padding(.bottom, manager.sparFel != nil ? 8 : 40)
                 .disabled(manager.ankarpunkter.isEmpty || manager.sparar)
+
+                if let fel = manager.sparFel {
+                    Text(fel)
+                        .font(.caption)
+                        .foregroundColor(.red)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal)
+                        .padding(.bottom, 24)
+                }
             }
         }
         .navigationBarHidden(true)
@@ -227,6 +237,7 @@ class KartläggManager: NSObject, ObservableObject, ARSessionDelegate {
     @Published var ankarpunkter: [Ankarpunkt] = []
     @Published var sparar = false
     @Published var sparad = false
+    @Published var sparFel: String? = nil
 
     func startaSession(session: ARSession) {
         self.session      = session
@@ -276,7 +287,7 @@ class KartläggManager: NSObject, ObservableObject, ARSessionDelegate {
             return
         }
 
-        var request        = URLRequest(url: URL(string: "http://192.168.0.166:8000/ankarpunkter/")!)
+        var request        = URLRequest(url: URL(string: "\(PulsArConfig.serverURL)/ankarpunkter/")!)
         request.httpMethod = "POST"
         request.httpBody   = json
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -287,10 +298,19 @@ class KartläggManager: NSObject, ObservableObject, ARSessionDelegate {
             DispatchQueue.main.async {
                 self.sparar = false
                 self.sparad = true
+                self.sparFel = nil
             }
             print("✅ Ankarpunkter sparade")
+        } catch let error as URLError where error.code == .cannotConnectToHost || error.code == .notConnectedToInternet {
+            DispatchQueue.main.async {
+                self.sparar = false
+                self.sparFel = "Kan inte nå servern — kontrollera WiFi och att backend körs"
+            }
         } catch {
-            DispatchQueue.main.async { self.sparar = false }
+            DispatchQueue.main.async {
+                self.sparar = false
+                self.sparFel = "Kunde inte spara: \(error.localizedDescription)"
+            }
             print("❌ Fel: \(error)")
         }
     }
