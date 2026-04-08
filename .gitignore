@@ -1,0 +1,55 @@
+# ─── Python ───────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+.venv/
+venv/
+env/
+*.so
+
+# ─── Data / modeller (för stora för git) ──────
+*.pt
+*.pth
+*.onnx
+*.bin
+*.safetensors
+BackendPulsAr/bilder/
+BackendPulsAr/bilder_augmenterade/
+BackendPulsAr/data/clip_index.npz
+BackendPulsAr/data/pulsar.db
+
+# ─── Swift / Xcode ────────────────────────────
+*.xcuserstate
+*.xcscmblueprint
+xcuserdata/
+DerivedData/
+build/
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+Pods/
+.build/
+Package.resolved
+
+# ─── IDE / OS ─────────────────────────────────
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+Thumbs.db
+
+# ─── Övrigt ───────────────────────────────────
+*.log
+.env
+Miniconda*.sh

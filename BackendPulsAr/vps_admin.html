@@ -1,0 +1,1084 @@
+<!DOCTYPE html>
+<html lang="sv">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Puls-AR VPS Admin</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            min-height: 100vh;
+        }
+
+        .container {
+            display: grid;
+            grid-template-columns: 1fr 380px;
+            height: 100vh;
+        }
+
+        /* Vänster sida - Karta */
+        .map-container {
+            position: relative;
+            background: #16213e;
+            overflow: hidden;
+        }
+
+        #mapCanvas {
+            width: 100%;
+            height: 100%;
+            cursor: grab;
+        }
+
+        #mapCanvas:active {
+            cursor: grabbing;
+        }
+
+        .map-overlay {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 10px 15px;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+
+        .map-controls {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            display: flex;
+            gap: 5px;
+        }
+
+        .map-controls button {
+            background: rgba(0, 0, 0, 0.7);
+            border: none;
+            color: white;
+            padding: 8px 12px;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        .map-controls button:hover {
+            background: rgba(50, 50, 50, 0.9);
+        }
+
+        /* Höger sida - Panel */
+        .panel {
+            background: #0f0f23;
+            padding: 20px;
+            overflow-y: auto;
+            border-left: 1px solid #333;
+        }
+
+        h1 {
+            font-size: 1.5em;
+            margin-bottom: 5px;
+            color: #00d4ff;
+        }
+
+        .subtitle {
+            color: #666;
+            font-size: 0.9em;
+            margin-bottom: 20px;
+        }
+
+        /* Status */
+        .status-bar {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 20px;
+            padding: 10px;
+            background: #1a1a2e;
+            border-radius: 8px;
+        }
+
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 0.85em;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+
+        .status-dot.online {
+            background: #00ff88;
+        }
+
+        .status-dot.offline {
+            background: #ff4444;
+        }
+
+        /* Stats */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .stat-box {
+            background: #1a1a2e;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 1.8em;
+            font-weight: bold;
+            color: #00d4ff;
+        }
+
+        .stat-label {
+            font-size: 0.8em;
+            color: #888;
+        }
+
+        /* Kartor lista */
+        .section-title {
+            font-size: 1.1em;
+            margin: 20px 0 10px;
+            color: #00d4ff;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .karta-lista {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .karta-item {
+            background: #1a1a2e;
+            padding: 12px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 2px solid transparent;
+        }
+
+        .karta-item:hover {
+            background: #252545;
+        }
+
+        .karta-item.selected {
+            border-color: #00d4ff;
+        }
+
+        .karta-item-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 5px;
+        }
+
+        .karta-namn {
+            font-weight: bold;
+        }
+
+        .karta-badges {
+            display: flex;
+            gap: 5px;
+        }
+
+        .badge {
+            font-size: 0.7em;
+            padding: 2px 6px;
+            border-radius: 10px;
+            background: #333;
+        }
+
+        .badge.loops {
+            background: #4a4;
+        }
+
+        .badge.luckor {
+            background: #a44;
+        }
+
+        .badge.merged {
+            background: #44a;
+        }
+
+        .karta-stats {
+            font-size: 0.85em;
+            color: #888;
+        }
+
+        .karta-actions {
+            display: flex;
+            gap: 5px;
+            margin-top: 8px;
+        }
+
+        .btn-small {
+            font-size: 0.75em;
+            padding: 4px 8px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+
+        .btn-small:hover {
+            opacity: 0.8;
+        }
+
+        .btn-radera {
+            background: #a33;
+            color: white;
+        }
+
+        .btn-merge {
+            background: #3a3;
+            color: white;
+        }
+
+        .btn-rebuild {
+            background: #33a;
+            color: white;
+        }
+
+        .btn-täckning {
+            background: #a3a;
+            color: white;
+        }
+
+        /* Täckning bar */
+        .täckning-bar {
+            height: 4px;
+            background: #333;
+            border-radius: 2px;
+            margin-top: 8px;
+            overflow: hidden;
+        }
+
+        .täckning-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #ff4444, #ffaa00, #00ff88);
+            transition: width 0.3s;
+        }
+
+        /* Test sektion */
+        .test-section {
+            margin-top: 20px;
+            padding: 15px;
+            background: #1a1a2e;
+            border-radius: 8px;
+        }
+
+        .drop-zone {
+            border: 2px dashed #444;
+            border-radius: 8px;
+            padding: 30px;
+            text-align: center;
+            color: #666;
+            margin: 10px 0;
+            transition: all 0.2s;
+        }
+
+        .drop-zone.dragover {
+            border-color: #00d4ff;
+            background: rgba(0, 212, 255, 0.1);
+        }
+
+        .drop-zone img {
+            max-width: 100%;
+            max-height: 150px;
+            border-radius: 5px;
+            margin-top: 10px;
+        }
+
+        button.primary {
+            background: #00d4ff;
+            color: #000;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            width: 100%;
+            margin-top: 10px;
+        }
+
+        button.primary:hover {
+            background: #00b8e0;
+        }
+
+        button.primary:disabled {
+            background: #444;
+            color: #888;
+            cursor: not-allowed;
+        }
+
+        /* Resultat */
+        .resultat {
+            margin-top: 15px;
+            padding: 10px;
+            background: #252545;
+            border-radius: 5px;
+            font-family: monospace;
+            font-size: 0.85em;
+            white-space: pre-wrap;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .resultat.success {
+            border-left: 3px solid #0f0;
+        }
+
+        .resultat.error {
+            border-left: 3px solid #f00;
+        }
+
+        /* Modal */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.8);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .modal-overlay.visible {
+            display: flex;
+        }
+
+        .modal {
+            background: #1a1a2e;
+            padding: 25px;
+            border-radius: 10px;
+            max-width: 400px;
+            width: 90%;
+        }
+
+        .modal h3 {
+            margin-bottom: 15px;
+            color: #ff6666;
+        }
+
+        .modal p {
+            margin-bottom: 20px;
+            color: #ccc;
+        }
+
+        .modal-buttons {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+        }
+
+        .modal-buttons button {
+            padding: 8px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        .btn-cancel {
+            background: #444;
+            color: #fff;
+        }
+
+        .btn-confirm {
+            background: #a33;
+            color: #fff;
+        }
+
+        /* Täckning Modal */
+        .täckning-modal {
+            max-width: 500px;
+        }
+
+        .täckning-modal h3 {
+            color: #00d4ff;
+        }
+
+        .täckning-stats {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin: 15px 0;
+        }
+
+        .täckning-stat {
+            background: #252545;
+            padding: 10px;
+            border-radius: 5px;
+            text-align: center;
+        }
+
+        .täckning-stat-value {
+            font-size: 1.5em;
+            font-weight: bold;
+            color: #00d4ff;
+        }
+
+        .täckning-stat-label {
+            font-size: 0.8em;
+            color: #888;
+        }
+
+        .lucka-lista,
+        .loop-lista {
+            max-height: 150px;
+            overflow-y: auto;
+            background: #252545;
+            padding: 10px;
+            border-radius: 5px;
+            margin-top: 10px;
+            font-size: 0.85em;
+        }
+
+        .lucka-item,
+        .loop-item {
+            padding: 5px 0;
+            border-bottom: 1px solid #333;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <!-- Vänster: Karta -->
+        <div class="map-container">
+            <canvas id="mapCanvas"></canvas>
+            <div class="map-overlay">
+                <span id="mapInfo">Välj en karta →</span>
+            </div>
+            <div class="map-controls">
+                <button onclick="resetView()">⟲ Reset</button>
+                <button onclick="zoomIn()">+</button>
+                <button onclick="zoomOut()">−</button>
+            </div>
+        </div>
+
+        <!-- Höger: Panel -->
+        <div class="panel">
+            <h1>🗺️ VPS Admin</h1>
+            <p class="subtitle">Visual Positioning System</p>
+
+            <!-- Status -->
+            <div class="status-bar">
+                <div class="status-item">
+                    <div class="status-dot" id="serverStatus"></div>
+                    <span>Server</span>
+                </div>
+                <div class="status-item">
+                    <div class="status-dot" id="vllmStatus"></div>
+                    <span>vLLM</span>
+                </div>
+            </div>
+
+            <!-- Stats -->
+            <div class="stats-grid">
+                <div class="stat-box">
+                    <div class="stat-value" id="antalKartor">-</div>
+                    <div class="stat-label">Kartor</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value" id="antalDesc">-</div>
+                    <div class="stat-label">Descriptors</div>
+                </div>
+            </div>
+
+            <!-- Kartor -->
+            <div class="section-title">
+                📍 Kartor
+                <button class="btn-small btn-rebuild" onclick="laddaOmStatus()">↻</button>
+            </div>
+            <div class="karta-lista" id="kartaLista">
+                <div style="color: #666; text-align: center; padding: 20px;">
+                    Laddar...
+                </div>
+            </div>
+
+            <!-- Test lokalisering -->
+            <div class="test-section">
+                <div class="section-title">🔍 Testa VPS-lokalisering</div>
+                <div class="drop-zone" id="dropZone">
+                    Dra in en bild här<br>
+                    <small>eller klicka för att välja</small>
+                    <input type="file" id="fileInput" accept="image/*" style="display:none">
+                </div>
+                <button class="primary" id="testBtn" disabled onclick="testaLokalisering()">
+                    Testa VPS-lokalisering
+                </button>
+                <div class="resultat" id="resultat" style="display:none"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Radera Modal -->
+    <div class="modal-overlay" id="raderaModal">
+        <div class="modal">
+            <h3>⚠️ Radera karta?</h3>
+            <p>Är du säker på att du vill radera <strong id="raderaKartaNamn"></strong>?<br>
+                Detta kan inte ångras.</p>
+            <div class="modal-buttons">
+                <button class="btn-cancel" onclick="stängModal('raderaModal')">Avbryt</button>
+                <button class="btn-confirm" onclick="bekräftaRadera()">Radera</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Täckning Modal -->
+    <div class="modal-overlay" id="täckningModal">
+        <div class="modal täckning-modal">
+            <h3>📊 Täckningsanalys</h3>
+            <p id="täckningKartaNamn"></p>
+            <div class="täckning-stats" id="täckningStats"></div>
+            <div id="täckningDetaljer"></div>
+            <div class="modal-buttons">
+                <button class="btn-cancel" onclick="stängModal('täckningModal')">Stäng</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ─────────────────────────────────────────────
+        // STATE
+        // ─────────────────────────────────────────────
+        let kartor = [];
+        let valdKarta = null;
+        let positioner = [];
+        let lokaliseradPos = null;
+        let testBild = null;
+        let kartaAttRadera = null;
+
+        // Karta rendering
+        let canvas, ctx;
+        let offset = { x: 0, y: 0 };
+        let scale = 50;
+        let isDragging = false;
+        let lastMouse = { x: 0, y: 0 };
+
+        // ─────────────────────────────────────────────
+        // INIT
+        // ─────────────────────────────────────────────
+        document.addEventListener('DOMContentLoaded', () => {
+            canvas = document.getElementById('mapCanvas');
+            ctx = canvas.getContext('2d');
+
+            resizeCanvas();
+            window.addEventListener('resize', resizeCanvas);
+
+            // Karta interaktion
+            canvas.addEventListener('mousedown', e => {
+                isDragging = true;
+                lastMouse = { x: e.clientX, y: e.clientY };
+            });
+            canvas.addEventListener('mousemove', e => {
+                if (isDragging) {
+                    offset.x += e.clientX - lastMouse.x;
+                    offset.y += e.clientY - lastMouse.y;
+                    lastMouse = { x: e.clientX, y: e.clientY };
+                    renderMap();
+                }
+            });
+            canvas.addEventListener('mouseup', () => isDragging = false);
+            canvas.addEventListener('mouseleave', () => isDragging = false);
+            canvas.addEventListener('wheel', e => {
+                e.preventDefault();
+                const factor = e.deltaY > 0 ? 0.9 : 1.1;
+                scale *= factor;
+                scale = Math.max(10, Math.min(200, scale));
+                renderMap();
+            });
+
+            // Fil drop
+            const dropZone = document.getElementById('dropZone');
+            const fileInput = document.getElementById('fileInput');
+
+            dropZone.addEventListener('click', () => fileInput.click());
+            dropZone.addEventListener('dragover', e => {
+                e.preventDefault();
+                dropZone.classList.add('dragover');
+            });
+            dropZone.addEventListener('dragleave', () => {
+                dropZone.classList.remove('dragover');
+            });
+            dropZone.addEventListener('drop', e => {
+                e.preventDefault();
+                dropZone.classList.remove('dragover');
+                handleFile(e.dataTransfer.files[0]);
+            });
+            fileInput.addEventListener('change', e => {
+                handleFile(e.target.files[0]);
+            });
+
+            // Ladda data
+            laddaStatus();
+            setInterval(laddaStatus, 5000);
+        });
+
+        function resizeCanvas() {
+            canvas.width = canvas.parentElement.clientWidth;
+            canvas.height = canvas.parentElement.clientHeight;
+            renderMap();
+        }
+
+        // ─────────────────────────────────────────────
+        // API
+        // ─────────────────────────────────────────────
+        async function laddaStatus() {
+            try {
+                // Server status
+                const statusResp = await fetch('/status/');
+                document.getElementById('serverStatus').className =
+                    'status-dot ' + (statusResp.ok ? 'online' : 'offline');
+
+                if (statusResp.ok) {
+                    const status = await statusResp.json();
+                    document.getElementById('vllmStatus').className =
+                        'status-dot ' + (status.vllm_ok ? 'online' : 'offline');
+                }
+            } catch {
+                document.getElementById('serverStatus').className = 'status-dot offline';
+            }
+
+            try {
+                // VPS status
+                const vpsResp = await fetch('/vps/status');
+                const vps = await vpsResp.json();
+
+                kartor = vps.kartor || [];
+                document.getElementById('antalKartor').textContent = vps.antal || 0;
+                document.getElementById('antalDesc').textContent =
+                    formatNumber(vps.totalt_descriptors || 0);
+
+                renderKartaLista();
+            } catch (e) {
+                console.error('VPS status fel:', e);
+            }
+        }
+
+        function laddaOmStatus() {
+            document.getElementById('kartaLista').innerHTML =
+                '<div style="color:#666;text-align:center;padding:20px;">Laddar...</div>';
+            laddaStatus();
+        }
+
+        function formatNumber(n) {
+            if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
+            return n.toString();
+        }
+
+        // ─────────────────────────────────────────────
+        // KARTA LISTA
+        // ─────────────────────────────────────────────
+        function renderKartaLista() {
+            const lista = document.getElementById('kartaLista');
+
+            if (kartor.length === 0) {
+                lista.innerHTML = '<div style="color:#666;text-align:center;padding:20px;">Inga kartor ännu. Skanna en gång med appen!</div>';
+                return;
+            }
+
+            lista.innerHTML = kartor.map(k => {
+                const täckning = k.täckning?.täckning || 0;
+                const täckningProcent = Math.round(täckning * 100);
+
+                let badges = '';
+                if (k.loopar > 0) badges += `<span class="badge loops">🔄 ${k.loopar}</span>`;
+                if (k.luckor > 0) badges += `<span class="badge luckor">⚠️ ${k.luckor}</span>`;
+                if (k.merges > 0) badges += `<span class="badge merged">🔗 ${k.merges}</span>`;
+
+                return `
+                    <div class="karta-item ${valdKarta === k.gång ? 'selected' : ''}" 
+                         onclick="väljKarta('${k.gång}')">
+                        <div class="karta-item-header">
+                            <span class="karta-namn">${k.gång}</span>
+                            <div class="karta-badges">${badges}</div>
+                        </div>
+                        <div class="karta-stats">
+                            ${k.antal_frames} frames • ${formatNumber(k.antal_desc)} desc
+                        </div>
+                        <div class="täckning-bar">
+                            <div class="täckning-fill" style="width: ${täckningProcent}%"></div>
+                        </div>
+                        <div class="karta-actions">
+                            <button class="btn-small btn-täckning" onclick="event.stopPropagation(); visaTäckning('${k.gång}')">📊</button>
+                            <button class="btn-small btn-merge" onclick="event.stopPropagation(); mergeKarta('${k.gång}')">🔗 Merge</button>
+                            <button class="btn-small btn-rebuild" onclick="event.stopPropagation(); rebuildKarta('${k.gång}')">🔄</button>
+                            <button class="btn-small btn-radera" onclick="event.stopPropagation(); visaRaderaModal('${k.gång}')">🗑️</button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        async function väljKarta(gång) {
+            valdKarta = gång;
+            renderKartaLista();
+
+            document.getElementById('mapInfo').textContent = `Laddar ${gång}...`;
+
+            try {
+                // Använd ASCII-endpoint
+                const gångParam = gång.replace(/ /g, '_');
+                const resp = await fetch(`/gang/${encodeURIComponent(gångParam)}/positioner`);
+                const data = await resp.json();
+
+                positioner = data.positioner || [];
+                document.getElementById('mapInfo').textContent =
+                    `${gång} — ${positioner.length} positioner`;
+
+                lokaliseradPos = null;
+                resetView();
+            } catch (e) {
+                console.error('Kunde inte ladda positioner:', e);
+                document.getElementById('mapInfo').textContent = 'Fel vid laddning';
+            }
+        }
+
+        // ─────────────────────────────────────────────
+        // KARTA ACTIONS
+        // ─────────────────────────────────────────────
+        function visaRaderaModal(gång) {
+            kartaAttRadera = gång;
+            document.getElementById('raderaKartaNamn').textContent = gång;
+            document.getElementById('raderaModal').classList.add('visible');
+        }
+
+        function stängModal(id) {
+            document.getElementById(id).classList.remove('visible');
+        }
+
+        async function bekräftaRadera() {
+            if (!kartaAttRadera) return;
+
+            try {
+                const gångParam = kartaAttRadera.replace(/ /g, '_');
+                const resp = await fetch(`/vps/karta/${encodeURIComponent(gångParam)}`, {
+                    method: 'DELETE'
+                });
+
+                if (resp.ok) {
+                    if (valdKarta === kartaAttRadera) {
+                        valdKarta = null;
+                        positioner = [];
+                        renderMap();
+                    }
+                    await laddaStatus();
+                } else {
+                    alert('Kunde inte radera kartan');
+                }
+            } catch (e) {
+                console.error('Radera fel:', e);
+                alert('Fel vid radering');
+            }
+
+            stängModal('raderaModal');
+            kartaAttRadera = null;
+        }
+
+        async function mergeKarta(gång) {
+            if (!confirm(`Slå ihop senaste skanningen med ${gång}?`)) return;
+
+            try {
+                const gångParam = gång.replace(/ /g, '_');
+                const resp = await fetch(`/vps/merge/${encodeURIComponent(gångParam)}`, {
+                    method: 'POST'
+                });
+                const data = await resp.json();
+
+                if (data.merged) {
+                    alert(`Merge klar!\n+${data.nya_descriptors} descriptors\nTotalt: ${data.totalt_descriptors}`);
+                    await laddaStatus();
+                } else {
+                    alert(`Merge: ${data.anledning || 'Okänt fel'}`);
+                }
+            } catch (e) {
+                console.error('Merge fel:', e);
+                alert('Fel vid merge');
+            }
+        }
+
+        async function rebuildKarta(gång) {
+            if (!confirm(`Bygg om kartan för ${gång}?`)) return;
+
+            try {
+                const gångParam = gång.replace(/ /g, '_');
+                const resp = await fetch(`/vps/rebuild/${encodeURIComponent(gångParam)}`, {
+                    method: 'POST'
+                });
+
+                if (resp.ok) {
+                    alert('Kartan har byggts om!');
+                    await laddaStatus();
+                    if (valdKarta === gång) {
+                        await väljKarta(gång);
+                    }
+                } else {
+                    alert('Kunde inte bygga om kartan');
+                }
+            } catch (e) {
+                console.error('Rebuild fel:', e);
+                alert('Fel vid ombyggnad');
+            }
+        }
+
+        async function visaTäckning(gång) {
+            try {
+                const gångParam = gång.replace(/ /g, '_');
+                const resp = await fetch(`/vps/tackning/${encodeURIComponent(gångParam)}`);
+                const data = await resp.json();
+
+                document.getElementById('täckningKartaNamn').textContent = gång;
+
+                const täckning = data.täckning || {};
+                document.getElementById('täckningStats').innerHTML = `
+                    <div class="täckning-stat">
+                        <div class="täckning-stat-value">${Math.round((täckning.täckning || 0) * 100)}%</div>
+                        <div class="täckning-stat-label">Täckning</div>
+                    </div>
+                    <div class="täckning-stat">
+                        <div class="täckning-stat-value">${(täckning.area_m2 || 0).toFixed(1)}</div>
+                        <div class="täckning-stat-label">Area (m²)</div>
+                    </div>
+                    <div class="täckning-stat">
+                        <div class="täckning-stat-value">${data.loopar || 0}</div>
+                        <div class="täckning-stat-label">Loopar</div>
+                    </div>
+                    <div class="täckning-stat">
+                        <div class="täckning-stat-value">${data.luckor || 0}</div>
+                        <div class="täckning-stat-label">Luckor</div>
+                    </div>
+                `;
+
+                let detaljer = '';
+
+                if (data.luckor > 0 && data.lucka_detaljer?.length > 0) {
+                    detaljer += '<h4 style="margin:15px 0 5px;color:#ff6666">⚠️ Luckor (saknad täckning)</h4>';
+                    detaljer += '<div class="lucka-lista">';
+                    data.lucka_detaljer.forEach(l => {
+                        detaljer += `<div class="lucka-item">Frame ${l.frame_a}→${l.frame_b}: ${l.avstånd.toFixed(2)}m gap</div>`;
+                    });
+                    detaljer += '</div>';
+                }
+
+                if (data.loopar > 0 && data.loop_detaljer?.length > 0) {
+                    detaljer += '<h4 style="margin:15px 0 5px;color:#66ff66">🔄 Loopar (bra för kalibrering)</h4>';
+                    detaljer += '<div class="loop-lista">';
+                    data.loop_detaljer.forEach(l => {
+                        detaljer += `<div class="loop-item">Frame ${l.frame_a}↔${l.frame_b} @ (${l.x.toFixed(2)}, ${l.z.toFixed(2)})</div>`;
+                    });
+                    detaljer += '</div>';
+                }
+
+                document.getElementById('täckningDetaljer').innerHTML = detaljer;
+                document.getElementById('täckningModal').classList.add('visible');
+
+            } catch (e) {
+                console.error('Täckning fel:', e);
+                alert('Kunde inte hämta täckningsdata');
+            }
+        }
+
+        // ─────────────────────────────────────────────
+        // KARTA RENDERING
+        // ─────────────────────────────────────────────
+        function renderMap() {
+            ctx.fillStyle = '#16213e';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            if (positioner.length === 0) {
+                ctx.fillStyle = '#444';
+                ctx.font = '16px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('Välj en karta i listan →', canvas.width / 2, canvas.height / 2);
+                return;
+            }
+
+            const centerX = canvas.width / 2 + offset.x;
+            const centerY = canvas.height / 2 + offset.y;
+
+            // Rita grid
+            ctx.strokeStyle = '#223';
+            ctx.lineWidth = 1;
+            for (let i = -20; i <= 20; i++) {
+                const x = centerX + i * scale;
+                const y = centerY + i * scale;
+                ctx.beginPath();
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, canvas.height);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(canvas.width, y);
+                ctx.stroke();
+            }
+
+            // Rita rutt
+            ctx.strokeStyle = '#00ff88';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+
+            positioner.forEach((pos, i) => {
+                const x = centerX + (pos.x || 0) * scale;
+                const y = centerY - (pos.z || 0) * scale;
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            });
+            ctx.stroke();
+
+            // Rita punkter
+            positioner.forEach((pos, i) => {
+                const x = centerX + (pos.x || 0) * scale;
+                const y = centerY - (pos.z || 0) * scale;
+
+                ctx.fillStyle = i === 0 ? '#00d4ff' :
+                    i === positioner.length - 1 ? '#ff4444' : '#00ff8855';
+                ctx.beginPath();
+                ctx.arc(x, y, i === 0 || i === positioner.length - 1 ? 6 : 3, 0, Math.PI * 2);
+                ctx.fill();
+            });
+
+            // Rita lokaliserad position
+            if (lokaliseradPos) {
+                const x = centerX + lokaliseradPos.x * scale;
+                const y = centerY - lokaliseradPos.z * scale;
+
+                // Pulsera
+                ctx.fillStyle = '#ff880088';
+                ctx.beginPath();
+                ctx.arc(x, y, 15, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.fillStyle = '#ff8800';
+                ctx.beginPath();
+                ctx.arc(x, y, 8, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Label
+                ctx.fillStyle = '#fff';
+                ctx.font = '12px sans-serif';
+                ctx.fillText(`(${lokaliseradPos.x.toFixed(2)}, ${lokaliseradPos.z.toFixed(2)})`, x + 15, y - 10);
+            }
+
+            // Skala
+            ctx.fillStyle = '#666';
+            ctx.font = '12px sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillText(`Skala: ${scale.toFixed(0)}px/m`, 10, canvas.height - 10);
+        }
+
+        function resetView() {
+            offset = { x: 0, y: 0 };
+            scale = 50;
+
+            if (positioner.length > 0) {
+                // Centrera på rutten
+                const xs = positioner.map(p => p.x || 0);
+                const zs = positioner.map(p => p.z || 0);
+                const centerX = (Math.min(...xs) + Math.max(...xs)) / 2;
+                const centerZ = (Math.min(...zs) + Math.max(...zs)) / 2;
+                offset.x = -centerX * scale;
+                offset.y = centerZ * scale;
+            }
+
+            renderMap();
+        }
+
+        function zoomIn() {
+            scale *= 1.2;
+            scale = Math.min(200, scale);
+            renderMap();
+        }
+
+        function zoomOut() {
+            scale *= 0.8;
+            scale = Math.max(10, scale);
+            renderMap();
+        }
+
+        // ─────────────────────────────────────────────
+        // TEST LOKALISERING
+        // ─────────────────────────────────────────────
+        function handleFile(file) {
+            if (!file || !file.type.startsWith('image/')) return;
+
+            testBild = file;
+
+            const reader = new FileReader();
+            reader.onload = e => {
+                const dropZone = document.getElementById('dropZone');
+                dropZone.innerHTML = `<img src="${e.target.result}" alt="Test"><br><small>${file.name}</small>`;
+                document.getElementById('testBtn').disabled = false;
+            };
+            reader.readAsDataURL(file);
+        }
+
+        async function testaLokalisering() {
+            if (!testBild) return;
+
+            const btn = document.getElementById('testBtn');
+            const resultat = document.getElementById('resultat');
+
+            btn.disabled = true;
+            btn.textContent = 'Lokaliserar...';
+            resultat.style.display = 'block';
+            resultat.className = 'resultat';
+            resultat.textContent = 'Skickar bild till servern...';
+
+            try {
+                const formData = new FormData();
+                formData.append('bild', testBild);
+
+                const resp = await fetch('/debug/lokalisera', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await resp.json();
+
+                if (data.hittad) {
+                    resultat.className = 'resultat success';
+                    resultat.textContent = JSON.stringify(data, null, 2);
+
+                    // Visa på kartan
+                    lokaliseradPos = { x: data.x, z: data.z };
+                    renderMap();
+                } else {
+                    resultat.className = 'resultat error';
+                    resultat.textContent = 'Kunde inte lokalisera:\n' + JSON.stringify(data, null, 2);
+                    lokaliseradPos = null;
+                    renderMap();
+                }
+            } catch (e) {
+                resultat.className = 'resultat error';
+                resultat.textContent = 'Fel: ' + e.message;
+            }
+
+            btn.disabled = false;
+            btn.textContent = 'Testa VPS-lokalisering';
+        }
+    </script>
+</body>
+
+</html>

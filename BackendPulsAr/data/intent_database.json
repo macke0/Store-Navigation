@@ -1,0 +1,529 @@
+{
+    "version": "1.0",
+    "beskrivning": "Intent-regler för produktsökning. Regler, inte produkter - så nya varor dyker upp automatiskt.",
+    "intents": {
+        "röd mjölk": {
+            "kategorier": [
+                "Standardmjölk, laktos",
+                "Standardmjölk, laktosfri"
+            ],
+            "kräv_ord": [],
+            "exkludera_ord": [],
+            "varumärke": null
+        },
+        "grön mjölk": {
+            "kategorier": [
+                "Mellanmjölk, laktos",
+                "Mellanmjölk, laktosfri"
+            ],
+            "kräv_ord": [],
+            "exkludera_ord": [],
+            "varumärke": null
+        },
+        "blå mjölk": {
+            "kategorier": [
+                "Lättmjölk, laktos",
+                "Lättmjölk, laktosfri",
+                "Minimjölk"
+            ],
+            "kräv_ord": [],
+            "exkludera_ord": [],
+            "varumärke": null
+        },
+        "mjölk": {
+            "kategorier": [
+                "Standardmjölk, laktos",
+                "Standardmjölk, laktosfri",
+                "Mellanmjölk, laktos",
+                "Mellanmjölk, laktosfri",
+                "Lättmjölk, laktos",
+                "Lättmjölk, laktosfri",
+                "Minimjölk"
+            ],
+            "kräv_ord": [],
+            "exkludera_ord": [],
+            "varumärke": null
+        },
+        "laktosfri mjölk": {
+            "kategorier": [
+                "Standardmjölk, laktosfri",
+                "Mellanmjölk, laktosfri",
+                "Lättmjölk, laktosfri"
+            ],
+            "kräv_ord": [],
+            "exkludera_ord": [],
+            "varumärke": null
+        },
+        "arla mjölk": {
+            "kategorier": [
+                "Standardmjölk, laktos",
+                "Mellanmjölk, laktos",
+                "Lättmjölk, laktos"
+            ],
+            "kräv_ord": [],
+            "exkludera_ord": [],
+            "varumärke": "arla"
+        },
+        "ica mjölk": {
+            "kategorier": [
+                "Standardmjölk, laktos",
+                "Mellanmjölk, laktos",
+                "Lättmjölk, laktos"
+            ],
+            "kräv_ord": [],
+            "exkludera_ord": [],
+            "varumärke": "ica"
+        },
+        "ägg": {
+            "kategorier": [
+                "Ägg"
+            ],
+            "kräv_ord": [],
+            "exkludera_ord": [],
+            "varumärke": null
+        },
+        "ica ägg": {
+            "kategorier": [
+                "Ägg"
+            ],
+            "kräv_ord": [],
+            "exkludera_ord": [],
+            "varumärke": "ica"
+        },
+        "ekologiska ägg": {
+            "kategorier": [
+                "Ägg"
+            ],
+            "kräv_ord": [
+                "ekologisk",
+                "eko",
+                "krav"
+            ],
+            "exkludera_ord": [],
+            "varumärke": null
+        },
+        "bröd": {
+            "kategorier": [
+                "skivat bröd",
+                "lantbröd",
+                "frallor",
+                "baguette",
+                "levain"
+            ],
+            "kräv_ord": [],
+            "exkludera_ord": [],
+            "varumärke": null
+        },
+        "ost": {
+            "kategorier": [
+                "hårdost",
+                "mjukost",
+                "färskost",
+                "dessertost",
+                "mozzarella",
+                "cheddar"
+            ],
+            "kräv_ord": [],
+            "exkludera_ord": [],
+            "varumärke": null
+        },
+        "kaffe": {
+            "kategorier": [
+                "bryggkaffe",
+                "snabbkaffe",
+                "espresso",
+                "kaffebönor",
+                "kaffekapslar"
+            ],
+            "kräv_ord": [],
+            "exkludera_ord": [],
+            "varumärke": null
+        },
+        "juice": {
+            "kategorier": [
+                "apelsinjuice",
+                "äppeljuice",
+                "juice",
+                "smoothie"
+            ],
+            "kräv_ord": [],
+            "exkludera_ord": [],
+            "varumärke": null
+        },
+        "yoghurt": {
+            "kategorier": [
+                "naturell yoghurt",
+                "fruktyoghurt",
+                "turkisk yoghurt",
+                "yoghurt"
+            ],
+            "kräv_ord": [],
+            "exkludera_ord": [],
+            "varumärke": null
+        },
+        "fil": {
+            "kategorier": [
+                "filmjölk",
+                "långfil",
+                "fil"
+            ],
+            "kräv_ord": [],
+            "exkludera_ord": [],
+            "varumärke": null
+        },
+        "smör": {
+            "kategorier": [
+                "smör",
+                "matfett",
+                "margarin"
+            ],
+            "kräv_ord": [],
+            "exkludera_ord": [],
+            "varumärke": null
+        },
+        "korv": {
+            "kategorier": [
+                "falukorv",
+                "grillkorv",
+                "varmkorv",
+                "prinskorv",
+                "chorizo"
+            ],
+            "kräv_ord": [],
+            "exkludera_ord": [],
+            "varumärke": null
+        },
+        "chips": {
+            "kategorier": [
+                "Chips",
+                "Tortillachips"
+            ],
+            "kräv_ord": [],
+            "exkludera_ord": [],
+            "varumärke": null
+        },
+        "pasta": {
+            "kategorier": [
+                "pasta",
+                "spaghetti",
+                "penne",
+                "fusilli"
+            ],
+            "kräv_ord": [],
+            "exkludera_ord": [],
+            "varumärke": null
+        },
+        "ris": {
+            "kategorier": [
+                "ris",
+                "basmatiris",
+                "jasminris"
+            ],
+            "kräv_ord": [],
+            "exkludera_ord": [],
+            "varumärke": null
+        },
+        "kyckling": {
+            "kategorier": [
+                "kycklingfilé",
+                "kycklingbröst",
+                "kyckling",
+                "kycklinglår"
+            ],
+            "kräv_ord": [],
+            "exkludera_ord": [],
+            "varumärke": null
+        },
+        "köttfärs": {
+            "kategorier": [
+                "nötfärs",
+                "blandfärs",
+                "fläskfärs",
+                "köttfärs"
+            ],
+            "kräv_ord": [],
+            "exkludera_ord": [],
+            "varumärke": null
+        },
+        "lax": {
+            "kategorier": [
+                "färsk lax",
+                "laxfilé",
+                "rökt lax",
+                "gravad lax"
+            ],
+            "kräv_ord": [],
+            "exkludera_ord": [],
+            "varumärke": null
+        },
+        "frukt": {
+            "kategorier": [
+                "äpple",
+                "banan",
+                "apelsin",
+                "päron",
+                "frukt"
+            ],
+            "kräv_ord": [],
+            "exkludera_ord": [],
+            "varumärke": null
+        },
+        "sojafärs": {
+            "kategorier": [
+                "vegetariskt",
+                "vegan",
+                "färs"
+            ],
+            "kräv_ord": [
+                "soja",
+                "vegansk"
+            ],
+            "exkludera_ord": [],
+            "varumärke": null
+        },
+        "ica sojafärs": {
+            "kategorier": [
+                "vegetariskt",
+                "vegan",
+                "färs"
+            ],
+            "kräv_ord": [
+                "soja"
+            ],
+            "exkludera_ord": [],
+            "varumärke": "ica"
+        },
+        "tofu": {
+            "kategorier": [
+                "tofu",
+                "vegetariskt"
+            ],
+            "kräv_ord": [
+                "tofu"
+            ],
+            "exkludera_ord": [],
+            "varumärke": null
+        },
+        "glass": {
+            "kategorier": [
+                "glass",
+                "gräddglass",
+                "sorbet"
+            ],
+            "kräv_ord": [],
+            "exkludera_ord": [],
+            "varumärke": null
+        },
+        "pizza": {
+            "kategorier": [
+                "fryst pizza",
+                "pizza"
+            ],
+            "kräv_ord": [],
+            "exkludera_ord": [],
+            "varumärke": null
+        },
+        "glutenfritt bröd": {
+            "kategorier": [
+                "Glutenfritt färskt bröd",
+                "Glutenfritt fryst bröd",
+                "Glutenfritt knäckebröd",
+                "Glutenfritt fryst fikabröd",
+                "Glutenfria maträttsbröd"
+            ],
+            "kräv_ord": [],
+            "exkludera_ord": [],
+            "varumärke": null
+        },
+        "laktosfri yoghurt": {
+            "kategorier": [
+                "Laktosfri yoghurt",
+                "Smaksatt yoghurt",
+                "Drickyoghurt",
+                "Turkisk yoghurt",
+                "Grekisk yoghurt"
+            ],
+            "kräv_ord": [
+                "laktosfri"
+            ],
+            "exkludera_ord": [],
+            "varumärke": null
+        },
+        "ekologisk pasta": {
+            "kategorier": [
+                "Spaghetti",
+                "Tagliatelle",
+                "Lasagneplattor",
+                "Makaroner",
+                "Formpasta",
+                "Färsk ofylld pasta",
+                "Glutenfri pasta",
+                "Penne"
+            ],
+            "kräv_ord": [
+                "eko",
+                "ekologisk",
+                "love eco"
+            ],
+            "exkludera_ord": [
+                "barnmat",
+                "färdigmat"
+            ],
+            "varumärke": null
+        },
+        "godis": {
+            "kategorier": [
+                "godis",
+                "lösgodis",
+                "choklad"
+            ],
+            "kräv_ord": [],
+            "exkludera_ord": [],
+            "varumärke": null
+        },
+        "vegansk ost": {
+            "kategorier": [
+                "Vegansk Ost",
+                "Skivad ost",
+                "Övrig hårdost",
+                "Färskost, laktosfri",
+                "Övrig matost"
+            ],
+            "kräv_ord": [
+                "vegan",
+                "vegansk",
+                "växtbaserad",
+                "violife",
+                "greenvie"
+            ],
+            "exkludera_ord": [],
+            "varumärke": null
+        }
+    },
+    "koncept": {
+        "fredagsmys": {
+            "beskrivning": "Typiska fredagsmys-produkter",
+            "kategorier": [
+                "chips",
+                "potatischips",
+                "dip",
+                "pizza",
+                "godis",
+                "glass",
+                "popcorn",
+                "läsk",
+                "korv",
+                "ost"
+            ],
+            "kräv_ord": []
+        },
+        "frukost": {
+            "beskrivning": "Frukostprodukter",
+            "kategorier": [
+                "müsli",
+                "flingor",
+                "yoghurt",
+                "filmjölk",
+                "juice",
+                "bröd",
+                "ost",
+                "ägg",
+                "smör"
+            ],
+            "kräv_ord": []
+        },
+        "mellanmål": {
+            "beskrivning": "Lätta mellanmål",
+            "kategorier": [
+                "frukt",
+                "nötter",
+                "yoghurt",
+                "kvarg",
+                "bar",
+                "kex",
+                "smoothie"
+            ],
+            "kräv_ord": []
+        },
+        "middag": {
+            "beskrivning": "Middagsprodukter",
+            "kategorier": [
+                "kött",
+                "fisk",
+                "kyckling",
+                "pasta",
+                "ris",
+                "potatis",
+                "sås",
+                "färs"
+            ],
+            "kräv_ord": []
+        },
+        "barnkalas": {
+            "beskrivning": "Kalas och festprodukter",
+            "kategorier": [
+                "godis",
+                "chips",
+                "läsk",
+                "tårta",
+                "glass",
+                "korv",
+                "popcorn"
+            ],
+            "kräv_ord": []
+        }
+    },
+    "modifierare": {
+        "vegan": {
+            "kräv_ord": [
+                "vegan",
+                "vegansk",
+                "växtbaserad"
+            ],
+            "exkludera_ord": []
+        },
+        "vegetarisk": {
+            "kräv_ord": [
+                "vegetarisk",
+                "vego"
+            ],
+            "exkludera_ord": [
+                "kött",
+                "kyckling",
+                "fläsk"
+            ]
+        },
+        "ekologisk": {
+            "kräv_ord": [
+                "eko",
+                "ekologisk",
+                "krav",
+                "organic"
+            ],
+            "exkludera_ord": []
+        },
+        "glutenfri": {
+            "kräv_ord": [
+                "glutenfri",
+                "gluten free"
+            ],
+            "exkludera_ord": []
+        },
+        "laktosfri": {
+            "kräv_ord": [
+                "laktosfri",
+                "lactose free"
+            ],
+            "exkludera_ord": []
+        }
+    },
+    "synonymer": {
+        "röd": "standardmjölk 3%",
+        "grön": "mellanmjölk 1.5%",
+        "blå": "lättmjölk 0.5%",
+        "veganskt": "vegan",
+        "eko": "ekologisk",
+        "lansen": "korv",
+        "faansen": "falukorv"
+    }
+}

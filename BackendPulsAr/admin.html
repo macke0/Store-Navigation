@@ -1,0 +1,1122 @@
+<!DOCTYPE html>
+<html lang="sv">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Puls-AR Admin</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #0a0a0f;
+            color: #fff;
+            font-family: -apple-system, sans-serif;
+            overflow: hidden;
+        }
+
+        #canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+        }
+
+        #sidebar {
+            position: fixed;
+            right: 0;
+            top: 0;
+            width: 320px;
+            height: 100vh;
+            background: rgba(15, 15, 25, 0.95);
+            border-left: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 20px;
+            overflow-y: auto;
+            z-index: 10;
+        }
+
+        h1 {
+            font-size: 18px;
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+
+        .subtitle {
+            font-size: 12px;
+            color: #888;
+            margin-bottom: 16px;
+        }
+
+        .flikar {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 16px;
+        }
+
+        .flik {
+            flex: 1;
+            padding: 8px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            background: transparent;
+            color: #aaa;
+            font-size: 13px;
+            cursor: pointer;
+        }
+
+        .flik.aktiv {
+            background: rgba(74, 222, 128, 0.2);
+            color: #4ade80;
+            border-color: #4ade80;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+
+        .stat {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            padding: 12px;
+            text-align: center;
+        }
+
+        .stat-num {
+            font-size: 24px;
+            font-weight: 700;
+            color: #4ade80;
+        }
+
+        .stat-label {
+            font-size: 11px;
+            color: #888;
+            margin-top: 2px;
+        }
+
+        .sök {
+            width: 100%;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            padding: 10px 14px;
+            color: #fff;
+            font-size: 14px;
+            margin-bottom: 16px;
+        }
+
+        .sök:focus {
+            outline: none;
+            border-color: #4ade80;
+        }
+
+        .filter-knappar {
+            display: flex;
+            gap: 6px;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+        }
+
+        .filter-knapp {
+            padding: 4px 10px;
+            border-radius: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            background: transparent;
+            color: #aaa;
+            font-size: 12px;
+            cursor: pointer;
+        }
+
+        .filter-knapp.aktiv {
+            background: #4ade80;
+            color: #000;
+            border-color: #4ade80;
+        }
+
+        .produkt-lista {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .produkt-kort {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            padding: 12px;
+            cursor: pointer;
+            border: 1px solid transparent;
+            transition: all 0.2s;
+        }
+
+        .produkt-kort:hover {
+            border-color: rgba(255, 255, 255, 0.2);
+        }
+
+        .produkt-kort.vald {
+            border-color: #4ade80;
+            background: rgba(74, 222, 128, 0.1);
+        }
+
+        .produkt-namn {
+            font-size: 13px;
+            font-weight: 500;
+            margin-bottom: 4px;
+        }
+
+        .produkt-meta {
+            font-size: 11px;
+            color: #888;
+        }
+
+        .produkt-status {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 10px;
+            font-weight: 600;
+        }
+
+        .status-ilager {
+            background: rgba(74, 222, 128, 0.2);
+            color: #4ade80;
+        }
+
+        .status-saknas {
+            background: rgba(239, 68, 68, 0.2);
+            color: #ef4444;
+        }
+
+        .status-kontrollera {
+            background: rgba(251, 191, 36, 0.2);
+            color: #fbbf24;
+        }
+
+        .gång-offset {
+            margin-top: 8px;
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .offset-input {
+            width: 60px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
+            padding: 4px;
+            color: #fff;
+            font-size: 12px;
+        }
+
+        .offset-label {
+            font-size: 11px;
+            color: #888;
+        }
+
+        /* Progressbar för täckningsprocent i översikten */
+        .täckning-bar {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+            height: 6px;
+            margin: 6px 0;
+        }
+
+        .täckning-fill {
+            height: 6px;
+            border-radius: 4px;
+            background: #4ade80;
+        }
+
+        #produkt-panel {
+            position: fixed;
+            left: 20px;
+            bottom: 20px;
+            background: rgba(15, 15, 25, 0.95);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            padding: 20px;
+            width: 300px;
+            z-index: 10;
+            display: none;
+        }
+
+        .panel-titel {
+            font-size: 16px;
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+
+        .panel-kategori {
+            font-size: 12px;
+            color: #888;
+            margin-bottom: 8px;
+        }
+
+        .panel-gång {
+            font-size: 12px;
+            color: #60a5fa;
+            margin-bottom: 8px;
+        }
+
+        .panel-koordinater {
+            font-size: 12px;
+            color: #4ade80;
+            font-family: monospace;
+            margin-bottom: 16px;
+        }
+
+        .panel-knappar {
+            display: flex;
+            gap: 8px;
+        }
+
+        .knapp {
+            flex: 1;
+            padding: 8px;
+            border-radius: 8px;
+            border: none;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .knapp-ta-bort {
+            background: rgba(239, 68, 68, 0.2);
+            color: #ef4444;
+        }
+
+        .knapp-stäng {
+            background: rgba(255, 255, 255, 0.1);
+            color: #aaa;
+        }
+
+        #laddnings-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #0a0a0f;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid rgba(74, 222, 128, 0.2);
+            border-top-color: #4ade80;
+            border-radius: 50%;
+            animation: snurra 1s linear infinite;
+        }
+
+        @keyframes snurra {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        #instruktioner {
+            position: fixed;
+            left: 20px;
+            top: 20px;
+            background: rgba(15, 15, 25, 0.8);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 12px 16px;
+            font-size: 12px;
+            color: #888;
+            z-index: 10;
+        }
+
+        .inst-rad {
+            margin-bottom: 4px;
+        }
+
+        .inst-rad:last-child {
+            margin-bottom: 0;
+        }
+
+        kbd {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+            padding: 1px 5px;
+            font-size: 11px;
+            color: #fff;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="laddnings-overlay">
+        <div class="spinner"></div>
+        <div style="color: #888; font-size: 14px;">Laddar butikskarta...</div>
+    </div>
+
+    <canvas id="canvas"></canvas>
+
+    <div id="instruktioner">
+        <div class="inst-rad"><kbd>Vänster mus</kbd> Rotera</div>
+        <div class="inst-rad"><kbd>Höger mus</kbd> Panorera</div>
+        <div class="inst-rad"><kbd>Scroll</kbd> Zooma</div>
+        <div class="inst-rad"><kbd>Klick</kbd> Välj produkt</div>
+    </div>
+
+    <div id="sidebar">
+        <h1>🛒 Puls-AR Admin</h1>
+        <div class="subtitle">ICA Maxi Bromma</div>
+
+        <!-- ÄNDRING 1: Lade till "Översikt" som tredje flik -->
+        <div class="flikar">
+            <button class="flik aktiv" onclick="byttFlik('produkter', this)">Produkter</button>
+            <button class="flik" onclick="byttFlik('gångar', this)">Gångar</button>
+            <button class="flik" onclick="byttFlik('översikt', this)">Översikt</button>
+        </div>
+
+        <div id="vy-produkter">
+            <div class="stats">
+                <div class="stat">
+                    <div class="stat-num" id="antal-produkter">0</div>
+                    <div class="stat-label">Produkter</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-num" id="antal-ilager" style="color: #4ade80">0</div>
+                    <div class="stat-label">I lager</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-num" id="antal-saknas" style="color: #ef4444">0</div>
+                    <div class="stat-label">Saknas</div>
+                </div>
+            </div>
+
+            <input class="sök" id="sök" placeholder="🔍 Sök produkt..." oninput="filterProdukter()">
+
+            <div class="filter-knappar">
+                <button class="filter-knapp aktiv" onclick="sättFilter('alla', this)">Alla</button>
+                <button class="filter-knapp" onclick="sättFilter('I lager', this)">I lager</button>
+                <button class="filter-knapp" onclick="sättFilter('Kontrollera', this)">Kontrollera</button>
+                <button class="filter-knapp" onclick="sättFilter('Saknas', this)">Saknas</button>
+            </div>
+
+            <div class="produkt-lista" id="produkt-lista"></div>
+        </div>
+
+        <div id="vy-gångar" style="display:none">
+            <p style="color:#888;font-size:12px;margin-bottom:12px">
+                Justera gångarnas position relativt varandra.
+            </p>
+            <div class="produkt-lista" id="gång-lista"></div>
+        </div>
+
+        <!-- ÄNDRING 2: Ny översiktsvy — fylls i dynamiskt av renderaÖversikt() -->
+        <div id="vy-översikt" style="display:none">
+            <div id="översikt-innehåll">
+                <p style="color:#888;font-size:12px">Laddar översikt...</p>
+            </div>
+        </div>
+    </div>
+
+    <div id="produkt-panel">
+        <div class="panel-titel" id="panel-namn"></div>
+        <div class="panel-kategori" id="panel-kategori"></div>
+        <div class="panel-gång" id="panel-gång"></div>
+        <div class="panel-koordinater" id="panel-koordinater"></div>
+
+        <!-- Ny redigeringssektion -->
+        <div id="panel-redigera" style="display:none;margin-top:12px">
+            <div style="font-size:11px;color:#888;margin-bottom:8px">REDIGERA</div>
+
+            <div style="margin-bottom:8px">
+                <div style="font-size:11px;color:#888;margin-bottom:4px">Status</div>
+                <select id="redigera-status" style="width:100%;background:rgba(255,255,255,0.1);
+                    border:1px solid rgba(255,255,255,0.2);border-radius:6px;
+                    padding:6px;color:#fff;font-size:12px">
+                    <option value="I lager">I lager</option>
+                    <option value="Kontrollera">Kontrollera</option>
+                    <option value="Saknas">Saknas</option>
+                </select>
+            </div>
+
+            <div style="margin-bottom:8px">
+                <div style="font-size:11px;color:#888;margin-bottom:4px">Gång</div>
+                <select id="redigera-gång" style="width:100%;background:rgba(255,255,255,0.1);
+                    border:1px solid rgba(255,255,255,0.2);border-radius:6px;
+                    padding:6px;color:#fff;font-size:12px">
+                </select>
+            </div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px">
+                <div>
+                    <div style="font-size:11px;color:#888;margin-bottom:4px">X</div>
+                    <input type="number" id="redigera-x" step="0.1" style="width:100%;background:rgba(255,255,255,0.1);
+                    border:1px solid rgba(255,255,255,0.2);border-radius:6px;
+                    padding:6px;color:#fff;font-size:12px">
+                </div>
+                <div>
+                    <div style="font-size:11px;color:#888;margin-bottom:4px">Y (höjd)</div>
+                    <input type="number" id="redigera-y" step="0.1" style="width:100%;background:rgba(255,255,255,0.1);
+                    border:1px solid rgba(255,255,255,0.2);border-radius:6px;
+                    padding:6px;color:#fff;font-size:12px">
+                </div>
+                <div>
+                    <div style="font-size:11px;color:#888;margin-bottom:4px">Z</div>
+                    <input type="number" id="redigera-z" step="0.1" style="width:100%;background:rgba(255,255,255,0.1);
+                    border:1px solid rgba(255,255,255,0.2);border-radius:6px;
+                    padding:6px;color:#fff;font-size:12px">
+                </div>
+            </div>
+
+            <button onclick="sparaRedigering()" style="width:100%;padding:8px;
+                background:rgba(74,222,128,0.2);color:#4ade80;border:1px solid #4ade80;
+                border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;margin-bottom:8px">
+                💾 Spara ändringar
+            </button>
+        </div>
+
+        <div class="panel-knappar">
+            <button class="knapp" onclick="växlaRedigering()" style="background:rgba(96,165,250,0.2);color:#60a5fa">
+                ✏️ Redigera
+            </button>
+            <button class="knapp knapp-ta-bort" onclick="taBort()">🗑️ Ta bort</button>
+            <button class="knapp knapp-stäng" onclick="stängPanel()">✕</button>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setSize(window.innerWidth - 320, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x0a0a0f);
+        scene.fog = new THREE.Fog(0x0a0a0f, 20, 50);
+
+        const camera = new THREE.PerspectiveCamera(
+            60, (window.innerWidth - 320) / window.innerHeight, 0.1, 100);
+        camera.position.set(0, 8, 8);
+        camera.lookAt(0, 0, 0);
+
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+        scene.add(ambientLight);
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(5, 10, 5);
+        scene.add(dirLight);
+        const pointLight = new THREE.PointLight(0x4ade80, 0.5, 20);
+        pointLight.position.set(0, 5, 0);
+        scene.add(pointLight);
+
+        const gridHelper = new THREE.GridHelper(30, 30, 0x222233, 0x181828);
+        scene.add(gridHelper);
+
+        let mus = { ner: false, höger: false, x: 0, y: 0 };
+        let orbital = {
+            theta: 0.5, phi: 1.0, radius: 12,
+            target: new THREE.Vector3(0, 0, 0)
+        };
+
+        canvas.addEventListener('mousedown', e => {
+            mus.ner = e.button === 0; mus.höger = e.button === 2;
+            mus.x = e.clientX; mus.y = e.clientY;
+        });
+        canvas.addEventListener('contextmenu', e => e.preventDefault());
+        window.addEventListener('mouseup', () => { mus.ner = false; mus.höger = false; });
+        window.addEventListener('mousemove', e => {
+            if (!mus.ner && !mus.höger) return;
+            const dx = e.clientX - mus.x;
+            const dy = e.clientY - mus.y;
+            mus.x = e.clientX; mus.y = e.clientY;
+            if (mus.ner) {
+                orbital.theta -= dx * 0.005;
+                orbital.phi = Math.max(0.1, Math.min(Math.PI - 0.1, orbital.phi + dy * 0.005));
+            }
+            if (mus.höger) {
+                const right = new THREE.Vector3(-Math.cos(orbital.theta), 0, Math.sin(orbital.theta));
+                orbital.target.addScaledVector(right, dx * 0.01);
+                orbital.target.addScaledVector(new THREE.Vector3(0, 1, 0), -dy * 0.01);
+            }
+            uppdateraKamera();
+        });
+        canvas.addEventListener('wheel', e => {
+            orbital.radius = Math.max(2, Math.min(30, orbital.radius + e.deltaY * 0.01));
+            uppdateraKamera();
+        });
+
+        function uppdateraKamera() {
+            camera.position.set(
+                orbital.target.x + orbital.radius * Math.sin(orbital.phi) * Math.sin(orbital.theta),
+                orbital.target.y + orbital.radius * Math.cos(orbital.phi),
+                orbital.target.z + orbital.radius * Math.sin(orbital.phi) * Math.cos(orbital.theta)
+            );
+            camera.lookAt(orbital.target);
+        }
+
+        let allaProdukter = [];
+        let allaGångar = [];
+        let valdProdukt = null;
+        let aktivFilter = 'alla';
+        let produktObjekt = {};
+
+        async function laddaData() {
+            const svar = await fetch('/admin/data');
+            const data = await svar.json();
+
+            allaProdukter = data.produkter || [];
+
+            const gångSvar = await fetch('/gångar/');
+            const gångData = await gångSvar.json();
+            allaGångar = gångData.gångar || [];
+
+            // Rita gångpositioner i 3D-kartan
+            // Varför: Vi hämtar de sparade LiDAR-positionerna för varje gång
+            // och ritar ut rutten + hyllorna i kartan
+            for (const gång of allaGångar) {
+                const posSvar = await fetch(`/gång/positioner?namn=${encodeURIComponent(gång.namn)}`);
+                const posData = await posSvar.json();
+                if (posData.positioner?.length > 0) {
+                    ritaGångPositioner(gång.namn, posData.positioner);
+                }
+            }
+
+            uppdateraStatistik();
+            renderaProdukter();
+            ritaProdukter();
+            document.getElementById('laddnings-overlay').style.display = 'none';
+        }
+
+        function ritaKarta(karta) {
+            karta.väggar?.forEach(vägg => {
+                const bredd = vägg.bredd || 3;
+                const höjd = vägg.höjd || 2.5;
+                const geo = new THREE.BoxGeometry(bredd, höjd, 0.15);
+                const mat = new THREE.MeshLambertMaterial({
+                    color: 0x2233aa, transparent: true, opacity: 0.4
+                });
+                const mesh = new THREE.Mesh(geo, mat);
+                mesh.position.set(vägg.x, (vägg.y || 0) + höjd / 2, vägg.z);
+                if (vägg.rot_w !== undefined) {
+                    mesh.quaternion.set(vägg.rot_x, vägg.rot_y, vägg.rot_z, vägg.rot_w);
+                }
+                scene.add(mesh);
+                const edges = new THREE.EdgesGeometry(geo);
+                const line = new THREE.LineSegments(edges,
+                    new THREE.LineBasicMaterial({ color: 0x4466ff, opacity: 0.8, transparent: true }));
+                line.position.copy(mesh.position);
+                line.quaternion.copy(mesh.quaternion);
+                scene.add(line);
+            });
+
+            karta.objekt?.forEach(obj => {
+                const bredd = obj.bredd || 1;
+                const höjd = obj.höjd || 1;
+                const djup = obj.djup || 0.5;
+                const typ = (obj.typ || "").toLowerCase();
+                const färg = typ.includes("storage") ? 0x8855ff :
+                    typ.includes("refrigerator") ? 0x0099ff :
+                        typ.includes("table") ? 0x886644 : 0x334455;
+
+                const geo = new THREE.BoxGeometry(bredd, höjd, djup);
+                const mat = new THREE.MeshLambertMaterial({
+                    color: färg, transparent: true, opacity: 0.6
+                });
+                const mesh = new THREE.Mesh(geo, mat);
+                mesh.position.set(obj.x, (obj.y || 0) + höjd / 2, obj.z);
+                scene.add(mesh);
+
+                if (typ.includes("storage")) {
+                    const edges = new THREE.EdgesGeometry(geo);
+                    const line = new THREE.LineSegments(edges,
+                        new THREE.LineBasicMaterial({ color: 0xaa88ff }));
+                    line.position.copy(mesh.position);
+                    scene.add(line);
+                }
+            });
+
+            const golvGeo = new THREE.PlaneGeometry(30, 30);
+            const golvMat = new THREE.MeshLambertMaterial({ color: 0x111122 });
+            const golv = new THREE.Mesh(golvGeo, golvMat);
+            golv.rotation.x = -Math.PI / 2;
+            scene.add(golv);
+        }
+
+        function ritaGångPositioner(gångNamn, positioner) {
+            // Rita rutten som en grön linje
+            // Varför: Visar exakt var personal gick under scanning
+            const punkter = positioner.map(p =>
+                new THREE.Vector3(p.x * 5, 0.1, (p.z || 0) * 5)
+            );
+            const geometry = new THREE.BufferGeometry().setFromPoints(punkter);
+            const linje = new THREE.Line(geometry,
+                new THREE.LineBasicMaterial({ color: 0x4ade80, opacity: 0.6, transparent: true })
+            );
+            scene.add(linje);
+
+            // Rita hyllor baserat på LiDAR-djup
+            // Varför: djup_vänster och djup_höger visar avstånd till hyllorna
+            // Vi ritar små boxar längs rutten för att visualisera hyllorna
+            positioner.forEach((pos, i) => {
+                if (i % 5 !== 0) return; // Var 5:e position för prestanda
+
+                const rotY = pos.rot_y || 0;
+                const px = pos.x * 5;
+                const pz = (pos.z || 0) * 5;
+
+                // Vänster hylla
+                if (pos.djup_vänster > 0.1 && pos.djup_vänster < 5) {
+                    const hx = px + pos.djup_vänster * 5 * Math.sin(rotY + Math.PI / 2);
+                    const hz = pz + pos.djup_vänster * 5 * Math.cos(rotY + Math.PI / 2);
+                    const geo = new THREE.BoxGeometry(0.3, 1.0, 0.3);
+                    const mat = new THREE.MeshLambertMaterial({
+                        color: 0x8855ff, transparent: true, opacity: 0.4
+                    });
+                    const mesh = new THREE.Mesh(geo, mat);
+                    mesh.position.set(hx, 0.5, hz);
+                    scene.add(mesh);
+                }
+
+                // Höger hylla
+                if (pos.djup_höger > 0.1 && pos.djup_höger < 5) {
+                    const hx = px + pos.djup_höger * 5 * Math.sin(rotY - Math.PI / 2);
+                    const hz = pz + pos.djup_höger * 5 * Math.cos(rotY - Math.PI / 2);
+                    const geo = new THREE.BoxGeometry(0.3, 1.0, 0.3);
+                    const mat = new THREE.MeshLambertMaterial({
+                        color: 0x8855ff, transparent: true, opacity: 0.4
+                    });
+                    const mesh = new THREE.Mesh(geo, mat);
+                    mesh.position.set(hx, 0.5, hz);
+                    scene.add(mesh);
+                }
+            });
+        }
+
+        function ritaProdukter() {
+            Object.values(produktObjekt).forEach(obj => scene.remove(obj));
+            produktObjekt = {};
+
+            const offsets = {};
+            allaGångar.forEach(g => {
+                offsets[g.namn] = { x: g.offset_x || 0, z: g.offset_z || 0 };
+            });
+
+            allaProdukter.forEach(prod => {
+                const färg = prod.status === 'I lager' ? 0x4ade80 :
+                    prod.status === 'Saknas' ? 0xef4444 : 0xfbbf24;
+
+                const offset = offsets[prod.gång] || { x: 0, z: 0 };
+
+                const geo = new THREE.SphereGeometry(0.08, 8, 8);
+                const mat = new THREE.MeshLambertMaterial({
+                    color: färg, emissive: färg, emissiveIntensity: 0.3
+                });
+                const mesh = new THREE.Mesh(geo, mat);
+                mesh.position.set(
+                    (prod.x + offset.x) * 5,
+                    0.5,
+                    ((prod.y || prod.z || 0) + offset.z) * 5
+                );
+                mesh.userData = { prod_id: prod.id };
+                scene.add(mesh);
+                produktObjekt[prod.id] = mesh;
+            });
+        }
+
+        const raycaster = new THREE.Raycaster();
+        const musVektor = new THREE.Vector2();
+
+        canvas.addEventListener('click', e => {
+            const rect = canvas.getBoundingClientRect();
+            musVektor.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+            musVektor.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+            raycaster.setFromCamera(musVektor, camera);
+            const träffar = raycaster.intersectObjects(Object.values(produktObjekt));
+            if (träffar.length > 0) {
+                välj(träffar[0].object.userData.prod_id);
+            } else {
+                stängPanel();
+            }
+        });
+
+        function välj(prod_id) {
+            valdProdukt = allaProdukter.find(p => p.id === prod_id);
+            if (!valdProdukt) return;
+
+            document.getElementById('panel-namn').textContent = valdProdukt.visningsnamn;
+            document.getElementById('panel-kategori').textContent = valdProdukt.kategori || '';
+            document.getElementById('panel-gång').textContent = `📍 ${valdProdukt.gång || 'okänd gång'}`;
+            document.getElementById('panel-koordinater').textContent =
+                `x: ${valdProdukt.x?.toFixed(2)} · z: ${(valdProdukt.y || valdProdukt.z || 0)?.toFixed(2)}`;
+            document.getElementById('produkt-panel').style.display = 'block';
+
+            document.querySelectorAll('.produkt-kort').forEach(k => k.classList.remove('vald'));
+            const kort = document.querySelector(`[data-id="${prod_id}"]`);
+            if (kort) { kort.classList.add('vald'); kort.scrollIntoView({ block: 'nearest' }); }
+
+            Object.entries(produktObjekt).forEach(([id, mesh]) => {
+                mesh.scale.setScalar(id === prod_id ? 2.5 : 1);
+            });
+        }
+
+        function stängPanel() {
+            valdProdukt = null;
+            document.getElementById('produkt-panel').style.display = 'none';
+            document.querySelectorAll('.produkt-kort').forEach(k => k.classList.remove('vald'));
+            Object.values(produktObjekt).forEach(m => m.scale.setScalar(1));
+        }
+
+        function växlaRedigering() {
+            const panel = document.getElementById('panel-redigera');
+            const visas = panel.style.display !== 'none';
+            panel.style.display = visas ? 'none' : 'block';
+
+            if (!visas && valdProdukt) {
+                // Fyll i nuvarande värden
+                document.getElementById('redigera-status').value =
+                    valdProdukt.status || 'I lager';
+                document.getElementById('redigera-x').value = valdProdukt.x?.toFixed(2) || 0;
+                document.getElementById('redigera-y').value = valdProdukt.y?.toFixed(2) || 0;
+                document.getElementById('redigera-z').value = (valdProdukt.z || valdProdukt.y || 0).toFixed(2);
+
+                // Fyll i gångar
+                const gångSelect = document.getElementById('redigera-gång');
+                gångSelect.innerHTML = allaGångar.map(g =>
+                    `<option value="${g.namn}" ${g.namn === valdProdukt.gång ? 'selected' : ''}>
+                        ${g.namn}
+                    </option>`
+                ).join('');
+            }
+        }
+
+        async function sparaRedigering() {
+            if (!valdProdukt) return;
+
+            const uppdatering = {
+                status: document.getElementById('redigera-status').value,
+                gång: document.getElementById('redigera-gång').value,
+                x: parseFloat(document.getElementById('redigera-x').value),
+                y: parseFloat(document.getElementById('redigera-y').value),
+                z: parseFloat(document.getElementById('redigera-z').value),
+            };
+
+            const svar = await fetch(`/admin/produkt/${valdProdukt.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(uppdatering)
+            });
+
+            if (svar.ok) {
+                // Uppdatera lokalt utan att ladda om
+                Object.assign(valdProdukt, uppdatering);
+
+                // Uppdatera 3D-kartan
+                ritaProdukter();
+                renderaProdukter();
+                uppdateraStatistik();
+
+                // Stäng redigeringspanelen
+                document.getElementById('panel-redigera').style.display = 'none';
+
+                // Visa bekräftelse
+                document.getElementById('panel-koordinater').textContent =
+                    `✅ Sparat! x: ${uppdatering.x.toFixed(2)} · z: ${uppdatering.z.toFixed(2)}`;
+            }
+        }
+
+        async function taBort() {
+            if (!valdProdukt) return;
+            if (!confirm(`Ta bort "${valdProdukt.visningsnamn}"?`)) return;
+            await fetch(`/admin/produkt/${valdProdukt.id}`, { method: 'DELETE' });
+            allaProdukter = allaProdukter.filter(p => p.id !== valdProdukt.id);
+            scene.remove(produktObjekt[valdProdukt.id]);
+            delete produktObjekt[valdProdukt.id];
+            stängPanel();
+            renderaProdukter();
+            uppdateraStatistik();
+        }
+
+        // ÄNDRING 3: byttFlik hanterar nu tre flikar och anropar rätt funktion
+        // Varför: Vi behöver dölja/visa rätt vy och ladda data när man byter flik
+        function byttFlik(flik, knapp) {
+            document.querySelectorAll('.flik').forEach(k => k.classList.remove('aktiv'));
+            knapp.classList.add('aktiv');
+            document.getElementById('vy-produkter').style.display =
+                flik === 'produkter' ? 'block' : 'none';
+            document.getElementById('vy-gångar').style.display =
+                flik === 'gångar' ? 'block' : 'none';
+            document.getElementById('vy-översikt').style.display =
+                flik === 'översikt' ? 'block' : 'none';
+            if (flik === 'gångar') laddaGångar();
+            if (flik === 'översikt') renderaÖversikt();
+        }
+
+        async function laddaGångar() {
+            const svar = await fetch('/gångar/');
+            const data = await svar.json();
+            allaGångar = data.gångar || [];
+
+            const lista = document.getElementById('gång-lista');
+            lista.innerHTML = '';
+
+            if (allaGångar.length === 0) {
+                lista.innerHTML = '<p style="color:#888;font-size:12px">Inga gångar skannade ännu.</p>';
+                return;
+            }
+
+            allaGångar.forEach(gång => {
+                const div = document.createElement('div');
+                div.className = 'produkt-kort';
+                div.innerHTML = `
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                        <div class="produkt-namn">${gång.namn}</div>
+                        <button onclick="resetGång('${gång.namn}')" 
+                            style="background:rgba(239,68,68,0.2);color:#ef4444;
+                                border:none;border-radius:6px;padding:4px 10px;
+                                font-size:11px;cursor:pointer">
+                            🔄 Reset
+                        </button>
+                    </div>
+                    <div class="produkt-meta">
+                        ${gång.produkter.length} produkter
+                        <span class="produkt-status status-ilager">Skannad</span>
+                    </div>
+                    <div class="gång-offset">
+                        <span class="offset-label">Offset X:</span>
+                        <input type="number" class="offset-input"
+                            value="${gång.offset_x || 0}" step="1"
+                            onchange="sparaGångPosition('${gång.namn}', this.value, null)">
+                        <span class="offset-label">Z:</span>
+                        <input type="number" class="offset-input"
+                            value="${gång.offset_z || 0}" step="1"
+                            onchange="sparaGångPosition('${gång.namn}', null, this.value)">
+                    </div>`;
+                lista.appendChild(div);
+            });
+        }
+
+        async function sparaGångPosition(namn, offsetX, offsetZ) {
+            const gång = allaGångar.find(g => g.namn === namn);
+            if (!gång) return;
+
+            const nyX = offsetX !== null ? parseFloat(offsetX) : (gång.offset_x || 0);
+            const nyZ = offsetZ !== null ? parseFloat(offsetZ) : (gång.offset_z || 0);
+
+            await fetch(`/gång/positioner?namn=${encodeURIComponent(gång.namn)}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ offset_x: nyX, offset_z: nyZ })
+            });
+
+            gång.offset_x = nyX;
+            gång.offset_z = nyZ;
+            ritaProdukter();
+        }
+
+        async function resetGång(namn) {
+            if (!confirm(`Är du säker på att du vill rensa ${namn}?\nAlla produkter i gången tas bort.`)) return;
+
+            const svar = await fetch(`/gång/${encodeURIComponent(namn)}/reset`, {
+                method: 'DELETE'
+            });
+            const data = await svar.json();
+
+            // Uppdatera lokalt
+            allaProdukter = allaProdukter.filter(p => p.gång !== namn);
+            ritaProdukter();
+            uppdateraStatistik();
+            laddaGångar();
+
+            alert(data.message);
+        }
+
+        // ÄNDRING 4: Ny funktion som bygger översiktsvyn
+        // Varför: Personal behöver snabbt se vilka gångar är skannade,
+        // hur många produkter finns per gång, och vilka gångar saknas helt.
+        // Den hämtar ankarpunkter från servern och jämför mot skannade gångar.
+        async function renderaÖversikt() {
+            const div = document.getElementById('översikt-innehåll');
+            div.innerHTML = '<p style="color:#888;font-size:12px">Laddar...</p>';
+
+            const ankSvar = await fetch('/ankarpunkter/');
+            const ankData = await ankSvar.json();
+            const ankarpunkter = ankData.ankarpunkter || [];
+
+            // Kolla vilka ankarpunkter som har positionsdata
+            // Varför: En gång är "skannad" om positionsfilen finns,
+            // oavsett om produkter hittades
+            const skannadeFlikar = new Set();
+            for (const a of ankarpunkter) {
+                const posSvar = await fetch(`/gång/positioner?namn=${encodeURIComponent(a.namn)}`);
+                const posData = await posSvar.json();
+                if (posData.positioner?.length > 0) {
+                    skannadeFlikar.add(a.namn);
+                }
+            }
+
+            // Räkna produktstatistik per gång
+            const gångStats = {};
+            allaProdukter.forEach(p => {
+                const g = p.gång || 'okänd';
+                if (!gångStats[g]) {
+                    gångStats[g] = { ilager: 0, saknas: 0, kontrollera: 0, senast: null };
+                }
+                if (p.status === 'I lager') gångStats[g].ilager++;
+                else if (p.status === 'Saknas') gångStats[g].saknas++;
+                else gångStats[g].kontrollera++;
+                if (p.senast_sedd && (!gångStats[g].senast || p.senast_sedd > gångStats[g].senast)) {
+                    gångStats[g].senast = p.senast_sedd;
+                }
+            });
+
+            const oskannade = ankarpunkter.filter(a => !skannadeFlikar.has(a.namn));
+
+            let html = `
+                <div class="stats" style="margin-bottom:16px">
+                    <div class="stat">
+                        <div class="stat-num">${skannadeFlikar.size}</div>
+                        <div class="stat-label">Skannade gångar</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-num" style="color:#ef4444">${oskannade.length}</div>
+                        <div class="stat-label">Ej skannade</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-num">${allaProdukter.length}</div>
+                        <div class="stat-label">Totalt produkter</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-num" style="color:#fbbf24">
+                            ${allaProdukter.filter(p => p.status === 'Kontrollera' || p.status === 'Saknas').length}
+                        </div>
+                        <div class="stat-label">Kräver åtgärd</div>
+                    </div>
+                </div>`;
+
+            if (skannadeFlikar.size > 0) {
+                html += '<div style="font-size:11px;color:#888;margin-bottom:8px;text-transform:uppercase;letter-spacing:1px">Skannade gångar</div>';
+                skannadeFlikar.forEach(gång => {
+                    const s = gångStats[gång] || { ilager: 0, saknas: 0, kontrollera: 0, senast: null };
+                    const total = s.ilager + s.saknas + s.kontrollera;
+                    const senast = s.senast ? new Date(s.senast).toLocaleDateString('sv-SE') : 'Inga produkter än';
+                    html += `
+                        <div class="produkt-kort" style="margin-bottom:8px">
+                            <div style="display:flex;justify-content:space-between;align-items:center">
+                                <div class="produkt-namn">${gång}</div>
+                                <span class="produkt-status status-ilager">${total > 0 ? total + ' prod.' : 'Skannad ✅'}</span>
+                            </div>
+                            ${total > 0 ? `
+                            <div class="täckning-bar">
+                                <div class="täckning-fill" style="width:${Math.round(s.ilager / total * 100)}%"></div>
+                            </div>
+                            <div style="display:flex;justify-content:space-between;font-size:11px;color:#888">
+                                <span>✅ ${s.ilager}</span>
+                                <span>⚠️ ${s.kontrollera}</span>
+                                <span>❌ ${s.saknas}</span>
+                            </div>` : ''}
+                            <div style="font-size:11px;color:#555;margin-top:4px">
+                                Senast skannad: ${senast}
+                            </div>
+                        </div>`;
+                });
+            }
+
+            if (oskannade.length > 0) {
+                html += '<div style="font-size:11px;color:#888;margin:12px 0 8px;text-transform:uppercase;letter-spacing:1px">Ej skannade</div>';
+                oskannade.forEach(a => {
+                    html += `
+                        <div class="produkt-kort" style="margin-bottom:8px;border-color:rgba(239,68,68,0.3)">
+                            <div style="display:flex;justify-content:space-between;align-items:center">
+                                <div class="produkt-namn">${a.namn}</div>
+                                <span class="produkt-status status-saknas">Ej skannad</span>
+                            </div>
+                        </div>`;
+                });
+            }
+
+            if (ankarpunkter.length === 0) {
+                html += '<p style="color:#888;font-size:12px;margin-top:16px">Kartlägg butiken först för att se översikten.</p>';
+            }
+
+            div.innerHTML = html;
+        }
+
+        function renderaProdukter() {
+            const sök = document.getElementById('sök').value.toLowerCase();
+            const lista = document.getElementById('produkt-lista');
+            lista.innerHTML = '';
+
+            const filtrerade = allaProdukter.filter(p => {
+                const matchSök = !sök || p.visningsnamn?.toLowerCase().includes(sök);
+                const matchFilter = aktivFilter === 'alla' || p.status === aktivFilter;
+                return matchSök && matchFilter;
+            });
+
+            filtrerade.forEach(prod => {
+                const statusKlass = prod.status === 'I lager' ? 'status-ilager' :
+                    prod.status === 'Saknas' ? 'status-saknas' : 'status-kontrollera';
+                const kort = document.createElement('div');
+                kort.className = 'produkt-kort';
+                kort.dataset.id = prod.id;
+                kort.innerHTML = `
+                    <div class="produkt-namn">${prod.visningsnamn}</div>
+                    <div class="produkt-meta">
+                        ${prod.varumarke || ''} · ${prod.gång || 'okänd gång'}
+                        <span class="produkt-status ${statusKlass}">${prod.status || 'I lager'}</span>
+                    </div>`;
+                kort.onclick = () => välj(prod.id);
+                lista.appendChild(kort);
+            });
+        }
+
+        function filterProdukter() { renderaProdukter(); }
+
+        function sättFilter(filter, knapp) {
+            aktivFilter = filter;
+            document.querySelectorAll('.filter-knapp').forEach(k => k.classList.remove('aktiv'));
+            knapp.classList.add('aktiv');
+            renderaProdukter();
+        }
+
+        function uppdateraStatistik() {
+            document.getElementById('antal-produkter').textContent = allaProdukter.length;
+            document.getElementById('antal-ilager').textContent =
+                allaProdukter.filter(p => p.status === 'I lager').length;
+            document.getElementById('antal-saknas').textContent =
+                allaProdukter.filter(p => p.status === 'Saknas').length;
+        }
+
+        function animera() {
+            requestAnimationFrame(animera);
+            const t = Date.now() * 0.001;
+            Object.entries(produktObjekt).forEach(([id, mesh]) => {
+                if (id !== valdProdukt?.id) {
+                    mesh.material.emissiveIntensity = 0.2 + Math.sin(t * 2 + mesh.position.x) * 0.1;
+                }
+            });
+            renderer.render(scene, camera);
+        }
+
+        window.addEventListener('resize', () => {
+            const w = window.innerWidth - 320;
+            const h = window.innerHeight;
+            camera.aspect = w / h;
+            camera.updateProjectionMatrix();
+            renderer.setSize(w, h);
+        });
+
+        animera();
+        laddaData();
+    </script>
+</body>
+
+</html>
