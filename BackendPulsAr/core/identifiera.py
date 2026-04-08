@@ -34,6 +34,7 @@ QWEN_CLIP_MATCH      = 55    # Hur likt Qwen och CLIP måste vara
 
 
 def identifiera_produkt(img: np.ndarray, ruta_nr: int = 0) -> dict | None:
+<<<<<<< HEAD
     """
     Pipeline:
       1. Qwen läser text på förpackningen
@@ -102,6 +103,30 @@ def identifiera_produkt(img: np.ndarray, ruta_nr: int = 0) -> dict | None:
         clip_likhet=clip_likhet,
         qwen_namn=qwen_namn,
     )
+=======
+    # Qwen läser texten
+    qwen_svar = fråga_qwen_vllm(img, ruta_nr)
+    if not qwen_svar or "OKÄND" in qwen_svar.upper():
+        return None
+    
+    qwen_namn = qwen_svar.strip().split("\n")[0]
+    
+    # Fuzzy-match mot ICA-databasen
+    from core.produktdb import slå_upp_produkt
+    match = slå_upp_produkt(qwen_namn)
+    
+    if not match or match.get("score", 0) < 78:
+        return None
+    
+    return {
+        "visningsnamn": match["kanoniskt_namn"],
+        "varumarke":    match.get("varumarke", ""),
+        "kategori":     match.get("kategori", ""),
+        "säkerhet":     "medium",
+        "clip_likhet":  0.0,
+    "qwen_svar":    qwen_namn,
+}
+>>>>>>> 2e8d6f5679be7e0a69e69ec255a4174f6c0b60b7
 
 
 def _bygg_resultat(kanoniskt: str, clip_info: dict,

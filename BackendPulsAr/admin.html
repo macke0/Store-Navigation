@@ -431,6 +431,7 @@
         <div class="panel-kategori" id="panel-kategori"></div>
         <div class="panel-gång" id="panel-gång"></div>
         <div class="panel-koordinater" id="panel-koordinater"></div>
+<<<<<<< HEAD
 
         <!-- Ny redigeringssektion -->
         <div id="panel-redigera" style="display:none;margin-top:12px">
@@ -489,6 +490,11 @@
             </button>
             <button class="knapp knapp-ta-bort" onclick="taBort()">🗑️ Ta bort</button>
             <button class="knapp knapp-stäng" onclick="stängPanel()">✕</button>
+=======
+        <div class="panel-knappar">
+            <button class="knapp knapp-ta-bort" onclick="taBort()">🗑️ Ta bort</button>
+            <button class="knapp knapp-stäng" onclick="stängPanel()">✕ Stäng</button>
+>>>>>>> 2e8d6f5679be7e0a69e69ec255a4174f6c0b60b7
         </div>
     </div>
 
@@ -775,6 +781,7 @@
             Object.values(produktObjekt).forEach(m => m.scale.setScalar(1));
         }
 
+<<<<<<< HEAD
         function växlaRedigering() {
             const panel = document.getElementById('panel-redigera');
             const visas = panel.style.display !== 'none';
@@ -833,6 +840,8 @@
             }
         }
 
+=======
+>>>>>>> 2e8d6f5679be7e0a69e69ec255a4174f6c0b60b7
         async function taBort() {
             if (!valdProdukt) return;
             if (!confirm(`Ta bort "${valdProdukt.visningsnamn}"?`)) return;
@@ -877,6 +886,7 @@
                 const div = document.createElement('div');
                 div.className = 'produkt-kort';
                 div.innerHTML = `
+<<<<<<< HEAD
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
                         <div class="produkt-namn">${gång.namn}</div>
                         <button onclick="resetGång('${gång.namn}')" 
@@ -886,6 +896,9 @@
                             🔄 Reset
                         </button>
                     </div>
+=======
+                    <div class="produkt-namn">${gång.namn}</div>
+>>>>>>> 2e8d6f5679be7e0a69e69ec255a4174f6c0b60b7
                     <div class="produkt-meta">
                         ${gång.produkter.length} produkter
                         <span class="produkt-status status-ilager">Skannad</span>
@@ -922,6 +935,7 @@
             ritaProdukter();
         }
 
+<<<<<<< HEAD
         async function resetGång(namn) {
             if (!confirm(`Är du säker på att du vill rensa ${namn}?\nAlla produkter i gången tas bort.`)) return;
 
@@ -939,6 +953,8 @@
             alert(data.message);
         }
 
+=======
+>>>>>>> 2e8d6f5679be7e0a69e69ec255a4174f6c0b60b7
         // ÄNDRING 4: Ny funktion som bygger översiktsvyn
         // Varför: Personal behöver snabbt se vilka gångar är skannade,
         // hur många produkter finns per gång, och vilka gångar saknas helt.

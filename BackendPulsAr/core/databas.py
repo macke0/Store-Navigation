@@ -1,6 +1,17 @@
 """
+<<<<<<< HEAD
 Permanent database for products and their positions
 SQLite saves the database as a file.
+=======
+databas.py  –  SQLite-databas för Puls-AR
+─────────────────────────────────────────────────────────────────
+Hanterar permanent lagring av produkter och positioner.
+
+Tabeller:
+  produkter  — produktinfo och koordinater
+  skanningar — historik över var produkter hittats
+  flaggor    — kunder rapporterar att produkt saknas
+>>>>>>> 2e8d6f5679be7e0a69e69ec255a4174f6c0b60b7
 """
 
 import sqlite3
@@ -11,13 +22,22 @@ from datetime import datetime
 DB_FIL = "data/pulsar.db"
 
 def get_conn():
+<<<<<<< HEAD
     #Opens or creates the database file
+=======
+    """Returnerar en databasanslutning."""
+>>>>>>> 2e8d6f5679be7e0a69e69ec255a4174f6c0b60b7
     conn = sqlite3.connect(DB_FIL)
     conn.row_factory = sqlite3.Row  # returnerar dict-liknande rader
     return conn
 
+<<<<<<< HEAD
 #Skapa tabeller om de inte finns
 def initiera_databas():
+=======
+def initiera_databas():
+    """Skapar tabeller om de inte finns."""
+>>>>>>> 2e8d6f5679be7e0a69e69ec255a4174f6c0b60b7
     conn = get_conn()
     c    = conn.cursor()
 
@@ -260,5 +280,9 @@ def _rad_till_dict(rad) -> dict:
     return d
 
 
+<<<<<<< HEAD
 # Initieras vid import, tabeller skapas om de inte finns
+=======
+# Initiera vid import
+>>>>>>> 2e8d6f5679be7e0a69e69ec255a4174f6c0b60b7
 initiera_databas()
