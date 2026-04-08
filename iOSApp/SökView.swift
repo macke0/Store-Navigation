@@ -127,7 +127,7 @@ struct SökView: View {
     @State private var visaARNavigation = false
     @State private var felmeddelande: String? = nil
     
-    let serverURL: String
+    let serverURL: String = PulsArConfig.serverURL
     
     let snabbSökningar = ["Mjölk", "Bröd", "Ägg", "Ost", "Kaffe", "Frukt"]
     
@@ -317,7 +317,7 @@ struct SökView: View {
 struct SökView_Previews: PreviewProvider {
     static var previews: some View {
         NavigationView {
-            SökView(serverURL: PulsArConfig.serverURL)
+            SökView()
         }
     }
 }

@@ -42,7 +42,7 @@ struct ContentView: View {
                     Spacer()
 
                     // Kundknapp
-                    NavigationLink(destination: SökView(serverURL: PulsArConfig.serverURL)) {
+                    NavigationLink(destination: SökView()) {
                         HStack(spacing: 16) {
                             Image(systemName: "magnifyingglass")
                                 .font(.title2)
