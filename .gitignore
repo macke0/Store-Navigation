@@ -1,68 +1,17 @@
-<<<<<<< HEAD
-# ─── Python ───────────────────────────────────
-__pycache__/
-*.py[cod]
-*.egg-info/
-dist/
-build/
-*.egg
-.venv/
-venv/
-env/
-*.so
-
-# ─── Data / modeller (för stora för git) ──────
-=======
 __pycache__/
 *.py[cod]
 *.egg-info/
 .venv/
 venv/
->>>>>>> 2e8d6f5679be7e0a69e69ec255a4174f6c0b60b7
 *.pt
 *.pth
 *.onnx
 *.bin
-<<<<<<< HEAD
 *.safetensors
-=======
->>>>>>> 2e8d6f5679be7e0a69e69ec255a4174f6c0b60b7
 BackendPulsAr/bilder/
 BackendPulsAr/bilder_augmenterade/
 BackendPulsAr/data/clip_index.npz
 BackendPulsAr/data/pulsar.db
-<<<<<<< HEAD
-
-# ─── Swift / Xcode ────────────────────────────
-*.xcuserstate
-*.xcscmblueprint
-xcuserdata/
-DerivedData/
-build/
-*.pbxuser
-*.mode1v3
-*.mode2v3
-*.perspectivev3
-*.moved-aside
-*.hmap
-*.ipa
-*.dSYM.zip
-*.dSYM
-Pods/
-.build/
-Package.resolved
-
-# ─── IDE / OS ─────────────────────────────────
-.DS_Store
-.idea/
-.vscode/
-*.swp
-*.swo
-*~
-Thumbs.db
-
-# ─── Övrigt ───────────────────────────────────
-=======
 *.xcuserstate
 xcuserdata/
 DerivedData/
@@ -72,7 +21,6 @@ Pods/
 .DS_Store
 .idea/
 .vscode/
->>>>>>> 2e8d6f5679be7e0a69e69ec255a4174f6c0b60b7
 *.log
 .env
 Miniconda*.sh
