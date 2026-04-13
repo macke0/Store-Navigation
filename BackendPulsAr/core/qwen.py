@@ -12,9 +12,11 @@ import base64
 import requests
 import cv2
 import numpy as np
+import os
 
-VLLM_URL = "http://127.0.0.1:8001/v1/chat/completions"
-MODELL = "Qwen/Qwen2.5-VL-32B-Instruct-AWQ"
+VLLM_URL = "https://openrouter.ai/api/v1/chat/completions"
+OPENROUTER_KEY = os.environ.get("OPENROUTER_KEY", "")
+MODELL = "qwen/qwen2.5-vl-72b-instruct"
 
 # ─────────────────────────────────────────────
 # BILDKONVERTERING
@@ -145,7 +147,11 @@ def fråga_qwen_vllm(img: np.ndarray, ruta_index: int = 0,
     # Försök upp till 2 gånger vid timeout
     for försök in range(2):
         try:
-            resp = requests.post(VLLM_URL, json=payload, timeout=timeout)
+            headers = {
+                "Authorization": f"Bearer {OPENROUTER_KEY}",
+                "Content-Type": "application/json"
+            }
+            resp = requests.post(VLLM_URL, json=payload, timeout=timeout, headers=headers)
             resp.raise_for_status()
             svar = resp.json()["choices"][0]["message"]["content"].strip()
             
@@ -203,7 +209,11 @@ def fråga_qwen_hylla(img: np.ndarray, ruta_index: int = 0,
 
     for försök in range(2):
         try:
-            resp = requests.post(VLLM_URL, json=payload, timeout=timeout)
+            headers = {
+                "Authorization": f"Bearer {OPENROUTER_KEY}",
+                "Content-Type": "application/json"
+            }
+            resp = requests.post(VLLM_URL, json=payload, timeout=timeout, headers=headers)
             resp.raise_for_status()
             svar = resp.json()["choices"][0]["message"]["content"].strip()
             svar = svar.replace("*", "").replace("#", "").strip()

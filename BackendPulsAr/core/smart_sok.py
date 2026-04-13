@@ -96,7 +96,7 @@ Svara ENDAST med sökord, ett per rad:"""
             print(f"⚠️ Kunde inte tolka sökning: {e}")
             return []
     
-    def _förfiltrera(self, query: str, max_kandidater: int = 200) -> list:
+    def _förfiltrera(self, query: str, max_kandidater: int = 50) -> list:
         """
         Förfiltrera produkter baserat på sökorden.
         Returnerar produkter som matchar minst ett sökord.
@@ -214,33 +214,20 @@ Svara ENDAST med sökord, ett per rad:"""
             f"{p['id']} | {p['namn']} | {p.get('kategori', '')}"
             for p in kandidater
         ])
-        
-        prompt = f"""Du är en ICA-butiksassistent. Kunden söker: "{query}"
 
-PRODUKTER ATT VÄLJA FRÅN:
+        prompt = f"""Kunden söker: "{query}"
+Produkter (id | namn | kategori):
 {produkt_lista}
-
-VIKTIGA REGLER:
-1. Välj ALLA produkter som matchar sökningen - inte bara några
-2. Om kunden söker "ekologisk pasta" - välj ALLA ekologiska pastor i listan
-3. Om kunden söker "röd mjölk" - välj ALLA standardmjölk 3%
-4. Om kunden anger märke (ICA, Arla) - prioritera det märket
-5. Max {limit} produkter totalt
-
-EXKLUDERA:
-- Barnmat (om inte kunden söker barnmat)
-- Färdigrätter (om kunden söker råvaror)
-- Nagellack, kläder och annat irrelevant
-
-Svara ENDAST med produkt-ID:n, ett per rad. Ingen annan text."""
+Svara med relevanta produkt-ID:n, ett per rad. Max {limit}. Ingen annan text."""
 
         try:
             response = self.client.messages.create(
                 model="claude-haiku-4-5-20251001",
-                max_tokens=1000,
+                max_tokens=300,
+                system="Du är en ICA-butiksassistent. Välj ALLA relevanta produkter. Exkludera irrelevant. Svara BARA med ID:n.",
                 messages=[{"role": "user", "content": prompt}]
             )
-            
+        
             # Parsa svar
             valda_ids = []
             for line in response.content[0].text.strip().split('\n'):
@@ -276,60 +263,37 @@ Svara ENDAST med produkt-ID:n, ett per rad. Ingen annan text."""
             pass
     
     async def sök(self, query: str, limit: int = 30) -> list:
-        """
-        Sök produkter.
-        
-        1. Kolla cache (<1ms)
-        2. Förfiltrera lokalt (<10ms)
-        3. Haiku väljer produkter (~1s)
-        4. Spara i cache
-        """
         query_norm = query.lower().strip()
-        cache_key = query_norm  # Utan limit - cachar alltid max resultat
-        
-        # Ladda om cache om annan worker har uppdaterat
+        cache_key = query_norm
+
         self._ladda_cache_om_ändrad()
-        
+
         # 1. Kolla cache
         if cache_key in self.cache:
             ids = self.cache[cache_key]
             produkter = [self.id_to_produkt[pid] for pid in ids if pid in self.id_to_produkt]
-            return produkter[:limit]  # Begränsa efter cache-hämtning
-        
+            return produkter[:limit]
+
         # 2. Förfiltrera lokalt
-        kandidater = self._förfiltrera(query, max_kandidater=200)
-        
-        # 3. Om för få kandidater: låt Haiku tolka sökningen först
-        if len(kandidater) < 10:
-            print(f"⚠️ Bara {len(kandidater)} kandidater för '{query}' → tolkar med Haiku...")
-            
-            # Haiku ger oss bättre sökord
-            keywords = self._tolka_okänd_sökning(query)
-            
-            if keywords:
-                # Sök med de nya keywords
-                kombinerad_query = " ".join(keywords)
-                kandidater = self._förfiltrera(kombinerad_query, max_kandidater=200)
-                print(f"   → {len(kandidater)} kandidater med tolkade keywords")
-        
+        kandidater = self._förfiltrera(query, max_kandidater=50)
+
         if not kandidater:
             print(f"⚠️ Inga kandidater för '{query}'")
             return []
-        
+
         print(f"🔍 '{query}': {len(kandidater)} kandidater → frågar Haiku...")
-        
-        # 4. Haiku väljer (alltid 50 för cache, returnerar limit)
-        cache_limit = 50
-        resultat = self._fråga_haiku(query, kandidater, cache_limit)
-        
-        # 5. Spara i cache
+
+        # 3. Haiku väljer
+        resultat = self._fråga_haiku(query, kandidater, 50)
+
+        # 4. Spara i cache
         if resultat:
             self.cache[cache_key] = [p['id'] for p in resultat]
             self._spara_cache()
             print(f"✨ Cachade '{query}' ({len(resultat)} produkter)")
-        
-        return resultat[:limit]  # Returnera bara begärt antal
-    
+
+        return resultat[:limit]
+
     def sök_sync(self, query: str, limit: int = 30, use_claude_fallback: bool = True) -> list:
         """Synkron wrapper för sök."""
         import asyncio

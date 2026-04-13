@@ -17,9 +17,68 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from core.smart_sok import SmartSök
+from pathlib import Path
+from rapidfuzz import fuzz
 
 # Global sökning-instans (laddas en gång)
 _smart_sök = None
+_positioner_cache = None
+_positioner_tid = 0
+
+def _ladda_positioner():
+    """Ladda identifierade produkters positioner från skanning."""
+    global _positioner_cache, _positioner_tid
+    import os, time
+    
+    prod_path = Path("/tmp/butik_modell/identifierade_produkter.json")
+    if not prod_path.exists():
+        return {}
+    
+    # Ladda om max var 10:e sekund
+    if _positioner_cache and time.time() - _positioner_tid < 10:
+        return _positioner_cache
+    
+    with open(prod_path) as f:
+        produkter = json.load(f)
+    
+    # Bygg lookup: produktnamn (lowercase) -> position
+    lookup = {}
+    for p in produkter:
+        namn = p.get("visningsnamn", "").lower().strip()
+        if namn:
+            lookup[namn] = {
+                "x": p.get("x"),
+                "y": p.get("y"),
+                "z": p.get("z"),
+                "gång": p.get("gång"),
+            }
+    
+    _positioner_cache = lookup
+    _positioner_tid = time.time()
+    return lookup
+
+def _hitta_position(produktnamn: str) -> dict:
+    """Hitta position för en produkt via fuzzy match."""
+    lookup = _ladda_positioner()
+    if not lookup:
+        return {}
+    
+    namn = produktnamn.lower().strip()
+    
+    # Exakt match
+    if namn in lookup:
+        return lookup[namn]
+    
+    # Fuzzy match
+    bästa_score = 0
+    bästa_pos = {}
+    for key, pos in lookup.items():
+        score = fuzz.token_set_ratio(namn, key)
+        if score > bästa_score and score >= 75:
+            bästa_score = score
+            bästa_pos = pos
+    
+    return bästa_pos
 
 
 def get_smart_sök():
@@ -68,14 +127,15 @@ def setup_sok_routes(app: FastAPI):
         # Formatera för iOS-appen
         produkter = []
         for p in resultat:
+            pos = _hitta_position(p.get("namn", ""))
             produkter.append({
                 "id": p.get("id", ""),
                 "visningsnamn": p.get("namn", ""),
                 "varumarke": p.get("varumarke", ""),
                 "kategori": p.get("kategori", ""),
                 "bild_url": p.get("bild_url", ""),
-                "gång": p.get("gång"),
-                "x": p.get("x"),
+                "gång": pos.get("gång") or p.get("gång"),
+                "x": pos.get("x") or p.get("x"),
                 "y": p.get("y"),
                 "z": p.get("z"),
                 "status": "I lager"

@@ -32,17 +32,20 @@ from core.feature_karta import bygg_karta
 from core.lokalisering  import lokalisera_kund
 from core.loop_closure import korrigera_loop_closure
 from core.positionering import korrigera_position, beräkna_hyllposition
-from core.läs_usdz import extrahera_koordinater
+#from core.läs_usdz import extrahera_koordinater
 from core.scanner import slug
 from core.qwen import fråga_qwen_vllm
 from core.sok     import sök_router, sätt_databas, smart_sök
-from core.clip_sok import clip_matcha
+# from core.clip_sok import clip_matcha
 from core.databas  import (spara_produkt as db_spara, hämta_produkt,
                             hämta_alla_produkter, ta_bort_produkt as db_ta_bort,
                             flagga_saknas, hämta_flaggor)
 from vps_3d_endpoints import router as vps_3d_router
 from sok_endpoint import setup_sok_routes
-
+from core.produkt_lista import router as produkt_lista_router
+from core.scan_viewer import router as viewer_router
+from core.butik_endpoints import router as butik_router
+from core.produkt_edit_endpoints import router as edit_router
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SETUP
@@ -54,6 +57,12 @@ setup_sok_routes(app)
 app.include_router(vps_3d_router)
 setup_vps_routes(app)
 app.include_router(sök_router)
+app.include_router(produkt_lista_router)
+app.include_router(viewer_router)
+app.include_router(butik_router)
+app.include_router(edit_router)
+
+
 
 databas: dict[str, dict] = {}
 
