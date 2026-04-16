@@ -87,6 +87,16 @@ def bundle_adjustment(
     t_start = time.time()
     
     # ─────────────────────────────────────────────
+    # 0. SAMPLA FRAMES
+    MAX_BA_FRAMES = 60
+    if len(frames_data) > MAX_BA_FRAMES:
+        alla_ids = sorted(frames_data.keys())
+        steg = max(1, len(alla_ids) // MAX_BA_FRAMES)
+        valda = alla_ids[::steg][:MAX_BA_FRAMES]
+        frames_data = {fid: frames_data[fid] for fid in valda}
+        if verbose:
+            print(f"   ⚡ Samplade {len(frames_data)}/{len(alla_ids)} frames")
+
     # 1. SAMLA OBSERVATIONER
     # ─────────────────────────────────────────────
     
@@ -254,19 +264,40 @@ def bundle_adjustment(
     # ─────────────────────────────────────────────
     
     ba_options = pycolmap.BundleAdjustmentOptions()
-    
     if verbose:
         print("   Kör bundle adjustment...")
-    
     try:
-        summary = pycolmap.bundle_adjustment(reconstruction, ba_options)
-        
+        import threading
+        ba_result = [None]
+        ba_error = [None]
+        def run_ba():
+            try:
+                ba_result[0] = pycolmap.bundle_adjustment(reconstruction, ba_options)
+            except Exception as e:
+                ba_error[0] = e
+        t = threading.Thread(target=run_ba)
+        t.start()
+        t.join(timeout=120)
+        if t.is_alive():
+            print("   ⚠️  BA timeout — använder ooptimerade positioner")
+            return _fallback_no_colmap(frames_data)
+        if ba_error[0]:
+            raise ba_error[0]
+        summary = ba_result[0]
         if verbose:
             print(f"   ✅ BA klar!")
-            
     except Exception as e:
         print(f"⚠️  Bundle adjustment misslyckades: {e}")
         return _fallback_no_colmap(frames_data)
+
+
+
+
+
+
+
+
+
     
     # ─────────────────────────────────────────────
     # 4. EXTRAHERA RESULTAT

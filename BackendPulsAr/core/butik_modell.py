@@ -318,12 +318,39 @@ class ButikModell:
                 frame_offset += 10
         
         total_frames = len(list(alla_frames_dir.glob("*.jpg")))
+        
+        # Sampla om för många frames (SuperPoint tar lång tid)
+        MAX_TOTAL_FRAMES = 2000
+        if total_frames > MAX_TOTAL_FRAMES:
+            import random
+            alla_jpgs = sorted(alla_frames_dir.glob("*.jpg"))
+            steg = max(1, len(alla_jpgs) // MAX_TOTAL_FRAMES)
+            behåll = set(alla_jpgs[::steg][:MAX_TOTAL_FRAMES])
+            # Behåll alltid första och sista (för loop closure)
+            behåll.add(alla_jpgs[0])
+            behåll.add(alla_jpgs[-1])
+            borttagna = 0
+            for f in alla_jpgs:
+                if f not in behåll:
+                    f.unlink()
+                    borttagna += 1
+            # Filtrera positioner och punkter
+            behåll_ids = set()
+            for f in behåll:
+                behåll_ids.add(int(f.stem.replace("frame_", "")))
+            alla_positioner = [p for p in alla_positioner if p.get("frame", 0) in behåll_ids]
+            alla_punkter = [p for p in alla_punkter if p.get("frame", 0) in behåll_ids]
+            print(f"   ⚡ Samplade {MAX_TOTAL_FRAMES}/{total_frames} frames (tog bort {borttagna})")
+            total_frames = MAX_TOTAL_FRAMES
+        
         print(f"📊 Samlade {total_frames} frames, {len(alla_positioner)} positioner, {len(alla_punkter)} 3D-punkter")
         
         return str(alla_frames_dir), alla_positioner, alla_punkter
     
     def bygg_global_karta(self) -> bool:
+        from core.butik_endpoints import uppdatera_progress
         print(f"\n🗺️  Bygger global karta för {self.namn}...")
+        uppdatera_progress("Samlar frames", 10)
         
         frames_dir, positioner, punkter_3d = self.samla_alla_frames()
 
@@ -356,14 +383,48 @@ class ButikModell:
                 print(f"✅ Global karta byggd (version {self.global_karta_version})")
                 
                 # Identifiera produkter
+                uppdatera_progress("Identifierar produkter", 70)
                 print(f"\n🔍 Startar produktidentifiering...")
+                # Använd ALLA frames från sessioner (inte samplade)
                 from core.produkt_pipeline import kör_pipeline
-                produkter = kör_pipeline(frames_dir, positioner, punkter_3d)
+                alla_pos = []
+                alla_pkt = []
+                original_frames = BUTIK_DIR / "alla_original_frames"
+                if original_frames.exists():
+                    shutil.rmtree(original_frames)
+                original_frames.mkdir()
+                for sid, session in sorted(self.sessioner.items()):
+                    if session.status not in ("klar", "pausad"):
+                        continue
+                    pp = session.session_dir / "positioner.json"
+                    if pp.exists():
+                        with open(pp) as f:
+                            alla_pos.extend(json.load(f))
+                    pk = session.session_dir / "punkter_3d.json"
+                    if pk.exists():
+                        with open(pk) as f:
+                            alla_pkt.extend(json.load(f))
+                    fd = session.frames_dir
+                    if fd.exists():
+                        for ff in fd.glob("*.jpg"):
+                            shutil.copy2(ff, original_frames / ff.name)
+                produkter = kör_pipeline(str(original_frames), alla_pos, alla_pkt)
+                if original_frames.exists():
+                    shutil.rmtree(original_frames)
                 print(f"✅ {len(produkter)} produkter identifierade och sparade")
+                
+                # Rensa temporära filer
+                alla_frames_dir = BUTIK_DIR / "alla_frames"
+                if alla_frames_dir.exists():
+                    shutil.rmtree(alla_frames_dir)
+                    print(f"🧹 Rensade temporära filer")
+                
+                uppdatera_progress("Klar", 100)
                 
                 return True
             
         except Exception as e:
+            uppdatera_progress(f"Fel: {e}", 0)
             print(f"❌ Kartbygge misslyckades: {e}")
             import traceback
             traceback.print_exc()

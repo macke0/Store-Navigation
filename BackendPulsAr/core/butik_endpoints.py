@@ -1,5 +1,5 @@
 """
-butik_endpoints.py — API-endpoints för butiksmodellen
+butik_endpoints.py — API-endpoints för butiksmodelle
 ───────────────────────────────────────────────────────
 Hanterar scan-sessioner, batch-upload, och kartbygge.
 
@@ -264,16 +264,19 @@ async def rescan_område(
 # ─────────────────────────────────────────────
 
 async def _bygg_karta_bakgrund():
-    """Bygg global karta i bakgrunden."""
-    try:
-        butik = get_butik()
-        butik.bygg_global_karta()
-    except Exception as e:
-        print(f"❌ Kartbygge misslyckades: {e}")
-        import traceback
-        traceback.print_exc()
+    """Bygg global karta i en separat tråd (blockerar inte servern)."""
+    import asyncio
+    def _bygg():
+        try:
+            butik = get_butik()
+            butik.bygg_global_karta()
+        except Exception as e:
+            print(f"❌ Kartbygge misslyckades: {e}")
+            import traceback
+            traceback.print_exc()
+    await asyncio.to_thread(_bygg)
 
-@router.get("/scan/täckning")
+@router.get("/täckning")
 async def skannad_täckning():
     """Returnera alla skannade positioner för att visa på karta."""
     butik = get_butik()
@@ -307,7 +310,7 @@ def uppdatera_progress(steg: str, procent: int):
     global _bygg_progress
     _bygg_progress = {"status": "bygger", "steg": steg, "procent": procent}
 
-@router.get("/scan/bygg-status")
+@router.get("/bygg-status")
 async def bygg_status():
     """Kolla progress för kartbygge."""
     butik = get_butik()

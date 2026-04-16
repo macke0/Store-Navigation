@@ -36,10 +36,10 @@ class ProduktPipeline:
             self.ica_produkter = json.load(f)
         self.ica_namn = {p['id']: p for p in self.ica_produkter}
         
-        # Bygg sökindex
+        # Bygg sökindex — bara produktnamn, inte kategori
         self.sök_index = []
         for p in self.ica_produkter:
-            sökbar = f"{p.get('namn', '')} {p.get('varumarke', '')} {p.get('kategori', '')}".lower()
+            sökbar = p.get('namn', '').lower()
             self.sök_index.append((sökbar, p))
         
         # 3D-punkter per frame
@@ -58,8 +58,8 @@ class ProduktPipeline:
     # STEG 1: IDENTIFIERA PRODUKTER I FRAMES
     # ─────────────────────────────────────────────
     
-    def identifiera_alla(self, max_workers: int = 4, 
-                          varannan_frame: int = 3) -> List[dict]:
+    def identifiera_alla(self, max_workers: int = 1, 
+                          varannan_frame: int = 10) -> List[dict]:
         """
         Kör Qwen på frames och identifiera produkter.
         
@@ -130,10 +130,16 @@ class ProduktPipeline:
         # Mediandjup från LiDAR
         frame_punkter = self.punkter_per_frame.get(frame_id, [])
         if frame_punkter:
-            djup = np.median([p.get("z", 1.0) for p in frame_punkter 
-                             if 0.3 < p.get("z", 0) < 5.0])
+            giltiga = [p.get("z", 1.0) for p in frame_punkter if 0.3 < p.get("z", 0) < 5.0]
+            djup = float(np.median(giltiga)) if giltiga else 1.5
         else:
+            djup = 1.5
+        
+        # Säkerhetskoll
+        if np.isnan(djup) or djup <= 0:
             djup = 1.5  # Default om ingen LiDAR
+        
+        produktnamn = list(dict.fromkeys(produktnamn))
         
         resultat = []
         for i, namn in enumerate(produktnamn):
@@ -146,6 +152,10 @@ class ProduktPipeline:
             # Produkten är framför kameran på avstånd = djup
             prod_x = cam_x + float(djup) * math.sin(rot_y)
             prod_z = cam_z + float(djup) * math.cos(rot_y)
+            
+            # Skippa om position är nan
+            if math.isnan(prod_x) or math.isnan(prod_z):
+                continue
             
             # Sprida produkter lite vertikalt (hyllhöjd)
             # Uppskatta baserat på position i bildlistan
@@ -179,13 +189,13 @@ class ProduktPipeline:
         
         # Skala ned
         h, w = img.shape[:2]
-        max_dim = 1024
+        max_dim = 1920
         if max(h, w) > max_dim:
             skala = max_dim / max(h, w)
             img = cv2.resize(img, (int(w * skala), int(h * skala)),
                            interpolation=cv2.INTER_LANCZOS4)
         
-        _, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        _, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 80])
         b64 = base64.b64encode(buf).decode("utf-8")
         
         openrouter_key = os.environ.get("OPENROUTER_KEY", "")
@@ -197,10 +207,11 @@ class ProduktPipeline:
                 "content": [
                     {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
                     {"type": "text", "text": (
-                        "You are scanning a Swedish grocery store shelf (ICA Maxi). "
-                        "Identify ALL products visible. One product per line. "
-                        "Format: 'Brand Productname' in Swedish. "
-                        "No markdown, no numbering. If unclear: skip it."
+                        "There are price tags on shelves in this image. "
+                        "Read the PRODUCT NAME and BRAND from each tag. Ignore the price number. "
+                        "Return format: Brand Productname Weight. One per line. "
+                        "Example: Findus Lättmajonnäs 200g "
+                        "If no tags visible: OKÄND"
                     )}
                 ]
             }],
@@ -213,23 +224,57 @@ class ProduktPipeline:
             "Content-Type": "application/json"
         }
         
-        try:
+        try: 
             resp = requests.post(
                 "https://openrouter.ai/api/v1/chat/completions",
-                json=payload, headers=headers, timeout=30
+                json=payload, headers=headers, timeout=60
             )
             resp.raise_for_status()
             svar = resp.json()["choices"][0]["message"]["content"].strip()
             svar = svar.replace("*", "").replace("#", "").strip()
+            if svar and "OKÄND" not in svar.upper():
+                print(f"      🔤 Qwen raw: {svar[:80]}")
             
             if not svar or "OKÄND" in svar.upper():
                 return []
             
+            # Slå ihop rader till produktbeskrivningar
+            # Qwen kan svara med namn på en rad, vikt/märke på nästa
+            rader = [r.strip().lstrip("0123456789.-) ") for r in svar.split("\n") if r.strip()]
+            rader = [r for r in rader if r and "OKÄND" not in r.upper()]
+            
+            if not rader:
+                return []
+            
+            # Filtrera bort OKÄND
+            rader = [r for r in rader if "OKÄND" not in r.upper()]
+            if not rader:
+                return []
+            
+            # Heuristik: om en rad bara är siffror/pris, slå ihop med föregående
             produkter = []
-            for rad in svar.split("\n"):
-                rad = rad.strip().lstrip("0123456789.-) ")
-                if rad and len(rad) > 2 and "OKÄND" not in rad.upper():
-                    produkter.append(rad)
+            current = ""
+            for rad in rader:
+                # Skippa priser, jmf-pris, "per kilogram" etc
+                rad_lower = rad.lower()
+                if any(skip in rad_lower for skip in ["per kilo", "per kg", "jmf", "dmf", "/förp", "/förd", "förp", "klubb", "the price", "the product", "the tag", "reads:", "visible", "image"]):
+                    continue
+                # Skippa rena prisrader (bara siffror och mellanslag)
+                stripped = rad.replace(" ", "").replace(".", "").replace(",", "").replace(":", "").replace("-", "")
+                if stripped.isdigit():
+                    continue
+                
+                # Om raden ser ut som vikt+märke (200g, FINDUS) → slå ihop
+                if current and (rad.endswith("g") or rad.endswith("l") or "," in rad):
+                    current = current + " " + rad
+                elif current:
+                    produkter.append(current)
+                    current = rad
+                else:
+                    current = rad
+            
+            if current:
+                produkter.append(current)
             
             return produkter
             
@@ -241,7 +286,7 @@ class ProduktPipeline:
     # FUZZY MATCH MOT ICA-KATALOG
     # ─────────────────────────────────────────────
     
-    def _fuzzy_match(self, qwen_namn: str, min_score: int = 60) -> Optional[dict]:
+    def _fuzzy_match(self, qwen_namn: str, min_score: int = 70) -> Optional[dict]:
         """Matcha Qwen-svar mot ICA-produkter."""
         from rapidfuzz import fuzz, process
         
@@ -259,9 +304,9 @@ class ProduktPipeline:
                     "score": 100,
                 }
         
-        # Fuzzy match
+        # Fuzzy match — partial_ratio funkar bättre för förkortningar (LÄTTMAJO → Lättmajonnäs)
         sökbara = [s for s, _ in self.sök_index]
-        match = process.extractOne(q, sökbara, scorer=fuzz.token_set_ratio)
+        match = process.extractOne(q, sökbara, scorer=fuzz.WRatio)
         
         if match and match[1] >= min_score:
             idx = sökbara.index(match[0])
@@ -282,7 +327,7 @@ class ProduktPipeline:
     # ─────────────────────────────────────────────
     
     def processa_och_spara(self, max_workers: int = 4, 
-                            varannan_frame: int = 3) -> List[dict]:
+                            varannan_frame: int = 10) -> List[dict]:
         """
         Kör hela pipelinen:
           1. Identifiera produkter i alla frames

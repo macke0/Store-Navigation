@@ -44,6 +44,7 @@ from vps_3d_endpoints import router as vps_3d_router
 from sok_endpoint import setup_sok_routes
 from core.produkt_lista import router as produkt_lista_router
 from core.scan_viewer import router as viewer_router
+from core.viewer_3d import router as viewer_3d_router
 from core.butik_endpoints import router as butik_router
 from core.produkt_edit_endpoints import router as edit_router
 
@@ -59,6 +60,7 @@ setup_vps_routes(app)
 app.include_router(sök_router)
 app.include_router(produkt_lista_router)
 app.include_router(viewer_router)
+app.include_router(viewer_3d_router)
 app.include_router(butik_router)
 app.include_router(edit_router)
 

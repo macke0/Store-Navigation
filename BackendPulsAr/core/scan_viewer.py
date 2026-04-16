@@ -62,6 +62,16 @@ async def viewer_data(namn: str):
         positioner = meta.get("positioner", [])
         for fid in meta.get("frames", []):
             frames.append({"id": fid, "har_bild": True})
+        # Om inga positioner i metadata, ladda från sessioner
+        if not positioner:
+            sessioner_dir = BUTIK_DIR / "sessioner"
+            if sessioner_dir.exists():
+                for sd in sorted(sessioner_dir.iterdir()):
+                    pp2 = sd / "positioner.json"
+                    if pp2.exists():
+                        with open(pp2) as f2: spos = json.load(f2)
+                        for p in spos: p["session"] = sd.name
+                        positioner.extend(spos)
     rd = Path("/tmp") / namn
     if rd.exists():
         for ff in sorted(rd.glob("frame_*.jpg")):
@@ -472,3 +482,44 @@ laddaSkanningar();
 </body>
 </html>
 """
+
+@router.get("/viewer/pointcloud")
+async def viewer_pointcloud(max_points: int = 50000):
+    """Returnera 3D-punktmoln från alla sessioner."""
+    import random
+    punkter = []
+    sessioner_dir = BUTIK_DIR / "sessioner"
+    if sessioner_dir.exists():
+        for sd in sorted(sessioner_dir.iterdir()):
+            pp = sd / "punkter_3d.json"
+            if pp.exists():
+                with open(pp) as f:
+                    pts = json.load(f)
+                for p in pts:
+                    punkter.append([
+                        round(p.get("x", 0), 3),
+                        round(p.get("y", 0), 3),
+                        round(p.get("z", 0), 3)
+                    ])
+    # Sampla om för många
+    if len(punkter) > max_points:
+        punkter = random.sample(punkter, max_points)
+    return {"antal": len(punkter), "punkter": punkter}
+
+
+@router.get("/viewer/pointcloud")
+async def viewer_pointcloud(max_points: int = 50000):
+    import random
+    punkter = []
+    sessioner_dir = BUTIK_DIR / "sessioner"
+    if sessioner_dir.exists():
+        for sd in sorted(sessioner_dir.iterdir()):
+            pp = sd / "punkter_3d.json"
+            if pp.exists():
+                with open(pp) as f:
+                    pts = json.load(f)
+                for p in pts:
+                    punkter.append([round(p.get("x",0),3),round(p.get("y",0),3),round(p.get("z",0),3)])
+    if len(punkter) > max_points:
+        punkter = random.sample(punkter, max_points)
+    return {"antal": len(punkter), "punkter": punkter}

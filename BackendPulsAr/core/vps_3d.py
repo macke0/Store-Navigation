@@ -626,7 +626,7 @@ def _lokalisera_mot_karta(
     
     t_pnp = time.time() - t0
     
-    if not success or inliers is None or len(inliers) < 6:
+    if not success or inliers is None or len(inliers) < 15:
         return {
             "hittad": False,
             "anledning": f"PnP misslyckades (inliers: {len(inliers) if inliers is not None else 0})",
@@ -648,7 +648,8 @@ def _lokalisera_mot_karta(
     if sy > 1e-6:
         roll = np.arctan2(R[2, 1], R[2, 2])
         pitch = np.arctan2(-R[2, 0], sy)
-        yaw = np.arctan2(R[1, 0], R[0, 0])
+        # Yaw runt Y-axeln (matchar ARKit)
+        yaw = -np.arctan2(-R[2, 0], R[2, 2])
     else:
         roll = np.arctan2(-R[1, 2], R[1, 1])
         pitch = np.arctan2(-R[2, 0], sy)

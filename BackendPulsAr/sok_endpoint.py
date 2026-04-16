@@ -1,3 +1,4 @@
+import json
 """
 Smart produktsökning endpoint för Puls-AR.
 
@@ -34,46 +35,55 @@ def _ladda_positioner():
     if not prod_path.exists():
         return {}
     
-    # Ladda om max var 10:e sekund
     if _positioner_cache and time.time() - _positioner_tid < 10:
         return _positioner_cache
     
     with open(prod_path) as f:
         produkter = json.load(f)
     
-    # Bygg lookup: produktnamn (lowercase) -> position
+    # Bygg lookup: både ID och namn -> position
     lookup = {}
     for p in produkter:
+        pos = {
+            "x": p.get("x"),
+            "y": p.get("y"),
+            "z": p.get("z"),
+            "gång": p.get("gång"),
+        }
+        pid = p.get("id", "").lower().strip()
+        if pid:
+            lookup[pid] = pos
         namn = p.get("visningsnamn", "").lower().strip()
         if namn:
-            lookup[namn] = {
-                "x": p.get("x"),
-                "y": p.get("y"),
-                "z": p.get("z"),
-                "gång": p.get("gång"),
-            }
+            lookup[namn] = pos
     
     _positioner_cache = lookup
     _positioner_tid = time.time()
     return lookup
 
-def _hitta_position(produktnamn: str) -> dict:
-    """Hitta position för en produkt via fuzzy match."""
+def _hitta_position(produktnamn: str, produkt_id: str = "") -> dict:
+    """Hitta position för en produkt via ID eller namn."""
     lookup = _ladda_positioner()
     if not lookup:
         return {}
     
-    namn = produktnamn.lower().strip()
+    # Kolla ID först
+    if produkt_id:
+        pid = produkt_id.lower().strip()
+        if pid in lookup:
+            return lookup[pid]
     
-    # Exakt match
+    # Exakt namnmatch
+    namn = produktnamn.lower().strip()
     if namn in lookup:
         return lookup[namn]
     
     # Fuzzy match
+    from rapidfuzz import fuzz
     bästa_score = 0
     bästa_pos = {}
     for key, pos in lookup.items():
-        score = fuzz.token_set_ratio(namn, key)
+        score = fuzz.WRatio(namn, key)
         if score > bästa_score and score >= 75:
             bästa_score = score
             bästa_pos = pos
@@ -127,7 +137,7 @@ def setup_sok_routes(app: FastAPI):
         # Formatera för iOS-appen
         produkter = []
         for p in resultat:
-            pos = _hitta_position(p.get("namn", ""))
+            pos = _hitta_position(p.get("namn", ""), p.get("id", ""))
             produkter.append({
                 "id": p.get("id", ""),
                 "visningsnamn": p.get("namn", ""),
@@ -136,8 +146,8 @@ def setup_sok_routes(app: FastAPI):
                 "bild_url": p.get("bild_url", ""),
                 "gång": pos.get("gång") or p.get("gång"),
                 "x": pos.get("x") or p.get("x"),
-                "y": p.get("y"),
-                "z": p.get("z"),
+                "y": pos.get("y") or p.get("y"),
+                "z": pos.get("z") or p.get("z"),
                 "status": "I lager"
             })
         
@@ -165,8 +175,8 @@ def setup_sok_routes(app: FastAPI):
                 "bild_url": p.get("bild_url", ""),
                 "gång": p.get("gång"),
                 "x": p.get("x"),
-                "y": p.get("y"),
-                "z": p.get("z"),
+                "y": pos.get("y") or p.get("y"),
+                "z": pos.get("z") or p.get("z"),
                 "status": "I lager"
             }
         
