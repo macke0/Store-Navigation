@@ -1,3 +1,81 @@
-bilder/
-bilder_augmenterade/
+# ─── Python ───────────────────────────────────
 __pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+.venv/
+venv/
+env/
+*.so
+
+# ─── Data / modeller (för stora för git) ──────
+*.pt
+*.pth
+*.onnx
+*.bin
+*.safetensors
+BackendPulsAr/bilder/
+BackendPulsAr/bilder_augmenterade/
+BackendPulsAr/data/clip_index.npz
+BackendPulsAr/data/pulsar.db
+
+# ─── Scan-frames och uppladdningar ────────────
+# Frames från skanningssessioner (kan vara hundratals MB)
+**/skanning_*/
+**/skanning3d_*/
+**/scan_*/
+**/frames/
+**/frame_*.jpg
+**/frame_*.jpeg
+**/frame_*.png
+
+# Test-bilder i repo-roten
+BackendPulsAr/IMG_*.jpeg
+BackendPulsAr/IMG_*.jpg
+BackendPulsAr/IMG_*.png
+
+# YOLO/ultralytics körningar
+BackendPulsAr/runs/
+
+# Mesh-data från ARKit
+**/mesh/
+*.usdz
+*.ply
+*.obj
+
+# Lokala kartor om de hamnar i repo
+**/kartor_3d/
+
+# ─── Swift / Xcode ────────────────────────────
+*.xcuserstate
+*.xcscmblueprint
+xcuserdata/
+DerivedData/
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+Pods/
+.build/
+Package.resolved
+
+# ─── IDE / OS ─────────────────────────────────
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+Thumbs.db
+
+# ─── Övrigt ───────────────────────────────────
+*.log
+.env
+Miniconda*.sh
