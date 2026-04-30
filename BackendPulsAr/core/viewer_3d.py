@@ -104,6 +104,8 @@ body{background:#0a0a0a;color:#e0e0e0;overflow:hidden;height:100vh;
     <span class="topbar-title">Puls-AR 3D <span id="gångLabel" style="color:#888;font-weight:400"></span></span>
     <button class="mode-btn active" id="mOrbit" onclick="setMode('orbit')">Orbit</button>
     <button class="mode-btn" id="mWalk" onclick="setMode('walk')">Walk</button>
+    <button class="mode-btn active" id="bMesh" onclick="toggleMesh()">Mesh</button>
+    <button class="mode-btn active" id="bPoints" onclick="togglePoints()">Punkter</button>
     <span class="stat" id="statTxt"></span>
     <span class="stat" id="livePosTxt" style="color:#00aaff"></span>
   </div>
@@ -144,6 +146,9 @@ let mmBounds={};
 
 // Live-position state (rapporterad av iOS-app eller web-test)
 let livePosMesh=null, livePosArrow=null, livePosLastT=0;
+
+// Mesh + punktmoln (för on/off)
+let meshObj=null, pointsObj=null;
 
 // Orbit state
 let orb = {r:12, phi:Math.PI/3.5, theta:0};
@@ -211,6 +216,7 @@ async function init(){
   buildPath();
   buildProducts();
   await buildPointCloud();
+  await buildMesh();
   centerCam();
   drawMinimap();
 
@@ -398,9 +404,108 @@ async function buildPointCloud(){
     geo.setAttribute('position',new THREE.BufferAttribute(positions,3));
     geo.setAttribute('color',new THREE.BufferAttribute(colors,3));
     const mat=new THREE.PointsMaterial({size:0.02,vertexColors:true,transparent:true,opacity:0.6,sizeAttenuation:true,depthWrite:false});
-    scene.add(new THREE.Points(geo,mat));
+    pointsObj = new THREE.Points(geo,mat);
+    scene.add(pointsObj);
     console.log('Punktmoln:',pts.length,'punkter');
   }catch(e){console.error('Pointcloud:',e)}
+}
+
+// ── MESH (ARKit/RoomPlan triangulerad yta) ──
+async function buildMesh(){
+  try{
+    const r=await fetch(`${API}/viewer/mesh/${encodeURIComponent(gång)}`);
+    if(!r.ok){console.warn('Ingen mesh:',r.status);return;}
+    const d=await r.json();
+    if(!d.vertices||!d.vertices.length||!d.faces||!d.faces.length){
+      console.warn('Tom mesh:',d.error||'');
+      return;
+    }
+
+    const geo=new THREE.BufferGeometry();
+
+    // Vertices → Float32Array
+    const positions=new Float32Array(d.vertices.length*3);
+    for(let i=0;i<d.vertices.length;i++){
+      positions[i*3]=d.vertices[i][0];
+      positions[i*3+1]=d.vertices[i][1];
+      positions[i*3+2]=d.vertices[i][2];
+    }
+    geo.setAttribute('position',new THREE.BufferAttribute(positions,3));
+
+    // Faces → index
+    const indices=new Uint32Array(d.faces.length*3);
+    for(let i=0;i<d.faces.length;i++){
+      indices[i*3]=d.faces[i][0];
+      indices[i*3+1]=d.faces[i][1];
+      indices[i*3+2]=d.faces[i][2];
+    }
+    geo.setIndex(new THREE.BufferAttribute(indices,1));
+
+    // Färgkodning per vertex baserat på face-klassifikation
+    // ARKit: 0=none, 1=wall, 2=floor, 3=ceiling, 4=table, 5=seat, 6=window, 7=door
+    const classColors={
+      0:[0.50,0.50,0.52],
+      1:[0.78,0.76,0.72],
+      2:[0.45,0.32,0.22],
+      3:[0.30,0.30,0.32],
+      4:[0.60,0.42,0.25],
+      5:[0.45,0.30,0.55],
+      6:[0.55,0.75,0.95],
+      7:[0.65,0.35,0.20],
+    };
+    const vertColors=new Float32Array(d.vertices.length*3);
+    for(let i=0;i<d.vertices.length;i++){
+      vertColors[i*3]=0.50; vertColors[i*3+1]=0.50; vertColors[i*3+2]=0.52;
+    }
+    if(d.classifications&&d.classifications.length===d.faces.length){
+      for(let i=0;i<d.faces.length;i++){
+        const cls=d.classifications[i]||0;
+        const col=classColors[cls]||classColors[0];
+        const f=d.faces[i];
+        for(let j=0;j<3;j++){
+          const vi=f[j];
+          vertColors[vi*3]=col[0];
+          vertColors[vi*3+1]=col[1];
+          vertColors[vi*3+2]=col[2];
+        }
+      }
+    }
+    geo.setAttribute('color',new THREE.BufferAttribute(vertColors,3));
+    geo.computeVertexNormals();
+
+    const mat=new THREE.MeshStandardMaterial({
+      vertexColors:true,
+      roughness:0.85,
+      metalness:0.05,
+      transparent:true,
+      opacity:0.9,
+      side:THREE.DoubleSide,
+      flatShading:false,
+    });
+
+    meshObj=new THREE.Mesh(geo,mat);
+    scene.add(meshObj);
+    console.log('Mesh:',d.antal_v,'verts,',d.antal_f,'faces');
+  }catch(e){console.error('mesh:',e)}
+}
+
+function toggleMesh(){
+  const btn=document.getElementById('bMesh');
+  if(!meshObj){
+    buildMesh().then(()=>{
+      if(meshObj){meshObj.visible=true;btn.classList.add('active');}
+    });
+    return;
+  }
+  meshObj.visible=!meshObj.visible;
+  btn.classList.toggle('active',meshObj.visible);
+}
+
+function togglePoints(){
+  const btn=document.getElementById('bPoints');
+  if(!pointsObj)return;
+  pointsObj.visible=!pointsObj.visible;
+  btn.classList.toggle('active',pointsObj.visible);
 }
 
 // ── CAMERA ──

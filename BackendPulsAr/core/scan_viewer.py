@@ -102,6 +102,75 @@ async def viewer_frame_bild(namn: str, frame_id: int):
     return {"error": "Frame ej hittad"}
 
 
+# ─── MESH (ARKit/RoomPlan) ──────────────────────────────────────────
+# Returnerar triangulerad mesh som JSON: vertices + faces + classifications.
+# Lazy-genererar från anchor-binärer i sessioner/{x}/mesh/. För 'hela_butiken'
+# slås alla sessioners meshar ihop.
+@router.get("/viewer/mesh/{namn}")
+async def viewer_mesh(namn: str):
+    try:
+        import numpy as np
+        from core.mesh_parser import parse_session_mesh
+    except Exception as e:
+        return {"error": f"mesh_parser ej tillgänglig: {e}", "vertices": [], "faces": []}
+
+    sessioner_dirs = []
+    if namn == "hela_butiken":
+        sd_root = BUTIK_DIR / "sessioner"
+        if sd_root.exists():
+            sessioner_dirs = [d for d in sorted(sd_root.iterdir()) if d.is_dir()]
+    else:
+        sd = BUTIK_DIR / "sessioner" / namn
+        if sd.exists():
+            sessioner_dirs = [sd]
+
+    if not sessioner_dirs:
+        return {"error": "ingen session", "vertices": [], "faces": [], "classifications": []}
+
+    alla_verts, alla_faces, alla_class = [], [], []
+    vert_offset = 0
+    for session_dir in sessioner_dirs:
+        try:
+            anchors = parse_session_mesh(session_dir)
+        except Exception as e:
+            print(f"⚠️ mesh-parse-fel i {session_dir}: {e}")
+            continue
+        for a in anchors:
+            try:
+                wv = a.world_vertices()
+            except Exception:
+                continue
+            alla_verts.append(wv)
+            alla_faces.append(a.faces + vert_offset)
+            if a.classifications is not None and len(a.classifications) == len(a.faces):
+                alla_class.append(a.classifications)
+            else:
+                alla_class.append(np.zeros(len(a.faces), dtype=np.uint8))
+            vert_offset += len(wv)
+
+    if not alla_verts:
+        return {"error": "ingen mesh-data", "vertices": [], "faces": [], "classifications": []}
+
+    verts = np.vstack(alla_verts).astype(np.float32)
+    faces = np.vstack(alla_faces).astype(np.uint32)
+    cls = np.concatenate(alla_class).astype(np.uint8) if alla_class else np.zeros(len(faces), dtype=np.uint8)
+
+    # Decimera om för stort (browser-prestanda) — enkel face-sampling
+    MAX_FACES = 200_000
+    if len(faces) > MAX_FACES:
+        step = len(faces) // MAX_FACES + 1
+        faces = faces[::step]
+        cls = cls[::step]
+
+    return {
+        "vertices": verts.tolist(),
+        "faces": faces.tolist(),
+        "classifications": cls.tolist(),
+        "antal_v": int(len(verts)),
+        "antal_f": int(len(faces)),
+    }
+
+
 VIEWER_HTML = """<!DOCTYPE html>
 <html lang="sv">
 <head>
