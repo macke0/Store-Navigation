@@ -2,11 +2,10 @@
 //  SkanningMenyView.swift
 //  PulsAr
 //
-//  Created by Johan Hartman on 2026-03-31.
-//
-
 
 import SwiftUI
+
+private let icaRöd = Color(red: 0.89, green: 0.12, blue: 0.17)
 
 struct SkanningMenyView: View {
     @Environment(\.dismiss) var dismiss
@@ -18,67 +17,87 @@ struct SkanningMenyView: View {
 
                 ScrollView {
                     VStack(spacing: 20) {
-
                         // Header
                         VStack(spacing: 8) {
                             Image(systemName: "building.2.fill")
                                 .font(.system(size: 40))
-                                .foregroundColor(.blue)
-                            Text("Skanna butik")
-                                .font(.largeTitle).fontWeight(.bold)
+                                .foregroundColor(icaRöd)
+                            Text("Personal")
+                                .font(.system(size: 32, weight: .bold, design: .rounded))
                                 .foregroundColor(.white)
                             Text("ICA Maxi Bromma")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(.white.opacity(0.4))
+                                .tracking(2)
+                                .textCase(.uppercase)
                         }
                         .padding(.top, 40)
                         .padding(.bottom, 10)
 
-                        // Steg 0 — Kartlägg
+                        // Skanna butiken
                         StegKort(
-                            nummer:      "0",
-                            titel:       "Kartlägg butiken",
-                            beskrivning: "Gå längs butiken och markera gångingångar, kassor och pelare. Görs en gång.",
+                            titel:       "Skanna butiken",
+                            beskrivning: "Filma hyllorna genom att gå genom butiken. Pausa och fortsätt när du vill.",
+                            ikon:        "camera.viewfinder",
+                            färg:        icaRöd
+                        ) {
+                            AnyView(PreflightView())
+                        }
+                        /*
+                        // Kartlägg (behålls för ankarpunkter)
+                        StegKort(
+                            titel:       "Markera referenspunkter",
+                            beskrivning: "Markera kassor, pelare och andra fasta punkter. Görs en gång.",
                             ikon:        "mappin.and.ellipse",
                             färg:        .orange
                         ) {
                             AnyView(KartläggView())
                         }
-
-                        // Steg 1 — Skanna gång
+                        */
                         StegKort(
-                            nummer:      "1",
-                            titel:       "Skanna gång",
-                            beskrivning: "Välj gång, starta vid ingången och filma längs hyllan. Återvänd till start.",
-                            ikon:        "video.fill",
-                            färg:        .green
+                            titel:       "Kalibrera butikskarta",
+                            beskrivning: "Koppla ICAs butikskarta till VPS. Gå till 3 punkter i butiken.",
+                            ikon:        "map.fill",
+                            färg:        .blue
                         ) {
-                            AnyView(GångSkanningView())
+                            AnyView(KalibreringView(butikId: "bromma_maxi"))
+                        }
+                        
+                        // Kundens navigationsvy - visa position på karta
+                        StegKort(
+                            titel:       "Öppna navigationskarta",
+                            beskrivning: "Se din position på butikskartan. Kräver kalibrering.",
+                            ikon:        "location.north.circle.fill",
+                            färg:        .cyan
+                        ) {
+                            AnyView(NavigationKartView(butikId: "bromma_maxi"))
                         }
 
-                        // Info-kort
+                        // Tips
                         VStack(alignment: .leading, spacing: 12) {
                             Text("Tips")
-                                .font(.headline)
+                                .font(.system(size: 15, weight: .bold, design: .rounded))
                                 .foregroundColor(.white)
 
                             InfoRad(ikon: "lightbulb.fill",
                                     text: "Bra belysning ger bättre produktigenkänning")
                             InfoRad(ikon: "figure.walk",
                                     text: "Gå långsamt och stadigt längs hyllan")
-                            InfoRad(ikon: "arrow.uturn.backward",
-                                    text: "Återvänd alltid till startpunkten för loop closure")
+                            InfoRad(ikon: "arrow.left.and.right",
+                                    text: "Filma från olika vinklar för bättre precision")
                             InfoRad(ikon: "camera.fill",
                                     text: "Håll kameran mot hylltaggarna")
+                            InfoRad(ikon: "pause.circle",
+                                    text: "Pausa och fortsätt när som helst")
                         }
                         .padding()
-                        .background(Color.white.opacity(0.05))
+                        .background(Color.white.opacity(0.04))
                         .cornerRadius(16)
                         .padding(.horizontal)
 
                         Button { dismiss() } label: {
                             Text("Stäng")
-                                .foregroundColor(.secondary)
+                                .foregroundColor(.white.opacity(0.3))
                                 .padding(.bottom, 40)
                         }
                     }
@@ -94,7 +113,6 @@ struct SkanningMenyView: View {
 // ─────────────────────────────────────────────────────────────────
 
 struct StegKort<Destination: View>: View {
-    let nummer:      String
     let titel:       String
     let beskrivning: String
     let ikon:        String
@@ -103,46 +121,38 @@ struct StegKort<Destination: View>: View {
 
     var body: some View {
         NavigationLink(destination: destination()) {
-            HStack(spacing: 16) {
-                // Stegnummer
+            HStack(spacing: 14) {
                 ZStack {
-                    Circle()
-                        .fill(färg.opacity(0.2))
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(färg.opacity(0.15))
                         .frame(width: 44, height: 44)
-                    Text(nummer)
-                        .font(.headline)
+                    Image(systemName: ikon)
+                        .font(.system(size: 18))
                         .foregroundColor(färg)
                 }
 
-                // Ikon
-                Image(systemName: ikon)
-                    .font(.title2)
-                    .foregroundColor(färg)
-                    .frame(width: 32)
-
-                // Text
                 VStack(alignment: .leading, spacing: 4) {
                     Text(titel)
-                        .font(.headline)
+                        .font(.system(size: 16, weight: .semibold, design: .rounded))
                         .foregroundColor(.white)
                     Text(beskrivning)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                        .font(.system(size: 12))
+                        .foregroundColor(.white.opacity(0.4))
                         .multilineTextAlignment(.leading)
                 }
 
                 Spacer()
 
                 Image(systemName: "chevron.right")
-                    .foregroundColor(.secondary)
-                    .font(.caption)
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(.white.opacity(0.2))
             }
-            .padding()
+            .padding(14)
             .background(Color.white.opacity(0.05))
-            .cornerRadius(16)
+            .cornerRadius(14)
             .overlay(
-                RoundedRectangle(cornerRadius: 16)
-                    .stroke(färg.opacity(0.3), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(färg.opacity(0.2), lineWidth: 1)
             )
             .padding(.horizontal)
         }
@@ -154,13 +164,14 @@ struct InfoRad: View {
     let text: String
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             Image(systemName: ikon)
-                .foregroundColor(.yellow)
+                .font(.system(size: 13))
+                .foregroundColor(.yellow.opacity(0.8))
                 .frame(width: 20)
             Text(text)
-                .font(.caption)
-                .foregroundColor(.secondary)
+                .font(.system(size: 13))
+                .foregroundColor(.white.opacity(0.45))
         }
     }
 }

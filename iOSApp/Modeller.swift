@@ -26,3 +26,13 @@ struct Ankarpunkt: Identifiable {
         ["namn": namn, "ikon": ikon, "x": x, "y": y, "z": z]
     }
 }
+
+struct Punkt3D: Codable {
+    let x: Float          // Världskoordinat X
+    let y: Float          // Världskoordinat Y (höjd)
+    let z: Float          // Världskoordinat Z
+    let u: Float          // Pixel-koordinat i bilden
+    let v: Float          // Pixel-koordinat i bilden
+    let frame: Int        // Vilken frame punkten kommer från
+    let confidence: Float // LiDAR-konfidens
+}

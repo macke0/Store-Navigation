@@ -10,7 +10,7 @@ enum PulsArConfig {
 
     /// Backend-serverns bas-URL (utan trailing slash)
     /// Ändra IP-adress om servern kör på en annan maskin.
-    static let serverURL = "http://192.168.0.166:8000"
+    static let serverURL = "http://100.84.130.65:8000"
 
     /// Timeout för vanliga API-anrop (sök, chat) i sekunder
     static let requestTimeout: TimeInterval = 15

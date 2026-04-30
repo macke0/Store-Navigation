@@ -1,119 +1,175 @@
-//
-//  ContentView 2.swift
-//  PulsAr
-//
-//  Created by Johan Hartman on 2026-03-31.
-//
-
-
 import SwiftUI
 
 struct ContentView: View {
     @State private var visaPersonalmeny = false
+    @State private var animateIn = false
+
+    private let icaRöd = Color(red: 0.89, green: 0.12, blue: 0.17)
+    private let icaMörkRöd = Color(red: 0.72, green: 0.08, blue: 0.12)
 
     var body: some View {
         NavigationView {
             ZStack {
+                // Bakgrund
                 Color.black.ignoresSafeArea()
 
-                VStack(spacing: 32) {
+                // Bakgrund - mörk gradient med röd accent
+                LinearGradient(
+                    colors: [
+                        Color(red: 0.35, green: 0.05, blue: 0.05),
+                        Color(red: 0.15, green: 0.02, blue: 0.02),
+                        .black
+                    ],
+                    startPoint: .top,
+                    endPoint: .center
+                )
+                .ignoresSafeArea()
 
-                    // Logo och titel
-                    VStack(spacing: 12) {
+                // Gradient overlay
+                VStack {
+                    Spacer()
+                        .frame(height: 150)
+                    LinearGradient(
+                        colors: [
+                            .black.opacity(0.0),
+                            .black.opacity(0.7),
+                            .black.opacity(0.95),
+                            .black
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                }
+                .ignoresSafeArea()
+
+                // Innehåll
+                VStack(spacing: 0) {
+                    Spacer()
+
+                    // Logo & titel
+                    VStack(spacing: 16) {
                         ZStack {
-                            Circle()
-                                .fill(Color.red.opacity(0.15))
-                                .frame(width: 100, height: 100)
-                            Image(systemName: "cart.fill.badge.plus")
-                                .font(.system(size: 44))
-                                .foregroundColor(.red)
-                        }
+                            RoundedRectangle(cornerRadius: 22)
+                                .fill(
+                                    LinearGradient(
+                                        colors: [icaRöd, icaMörkRöd],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                                .frame(width: 74, height: 74)
+                                .shadow(color: icaRöd.opacity(0.4), radius: 16, y: 6)
 
-                        Text("Puls-AR")
-                            .font(.system(size: 42, weight: .bold))
-                            .foregroundColor(.white)
-
-                        Text("ICA Maxi Bromma")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                    }
-                    .padding(.top, 60)
-
-                    Spacer()
-
-                    // Kundknapp
-                    NavigationLink(destination: SökView()) {
-                        HStack(spacing: 16) {
-                            Image(systemName: "magnifyingglass")
-                                .font(.title2)
+                            Image(systemName: "cart.fill")
+                                .font(.system(size: 32, weight: .medium))
                                 .foregroundColor(.white)
-                                .frame(width: 40)
-                            VStack(alignment: .leading, spacing: 4) {
+                        }
+                        .opacity(animateIn ? 1 : 0)
+                        .offset(y: animateIn ? 0 : 20)
+
+                        VStack(spacing: 6) {
+                            Text("Puls-AR")
+                                .font(.system(size: 36, weight: .bold, design: .rounded))
+                                .foregroundColor(.white)
+
+                            Text("ICA Maxi Bromma")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(.white.opacity(0.5))
+                                .tracking(2)
+                                .textCase(.uppercase)
+                        }
+                        .opacity(animateIn ? 1 : 0)
+                        .offset(y: animateIn ? 0 : 15)
+                    }
+                    .padding(.bottom, 44)
+
+                    // Knappar
+                    VStack(spacing: 12) {
+                        // Sök-knapp
+                        NavigationLink(destination: SökView()) {
+                            HStack(spacing: 12) {
+                                Image(systemName: "magnifyingglass")
+                                    .font(.system(size: 16, weight: .bold))
+                                    .foregroundColor(.white)
+
                                 Text("Hitta en vara")
-                                    .font(.headline)
+                                    .font(.system(size: 16, weight: .bold, design: .rounded))
                                     .foregroundColor(.white)
-                                Text("Sök och navigera till produkter")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .foregroundColor(.secondary)
-                        }
-                        .padding()
-                        .background(Color.red.opacity(0.15))
-                        .cornerRadius(16)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 16)
-                                .stroke(Color.red.opacity(0.4), lineWidth: 1)
-                        )
-                    }
-                    .padding(.horizontal)
 
-                    // Personalknapp
-                    Button {
-                        visaPersonalmeny = true
-                    } label: {
-                        HStack(spacing: 16) {
-                            Image(systemName: "person.badge.key.fill")
-                                .font(.title2)
-                                .foregroundColor(.white)
-                                .frame(width: 40)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Personal")
-                                    .font(.headline)
-                                    .foregroundColor(.white)
-                                Text("Skanna och uppdatera butiken")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
+                                Spacer()
+
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 13, weight: .bold))
+                                    .foregroundColor(.white.opacity(0.6))
                             }
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .foregroundColor(.secondary)
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 16)
+                            .background(
+                                LinearGradient(
+                                    colors: [icaRöd, icaMörkRöd],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            .cornerRadius(14)
+                            .shadow(color: icaRöd.opacity(0.35), radius: 10, y: 4)
                         }
-                        .padding()
-                        .background(Color.blue.opacity(0.15))
-                        .cornerRadius(16)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 16)
-                                .stroke(Color.blue.opacity(0.4), lineWidth: 1)
-                        )
+                        .opacity(animateIn ? 1 : 0)
+                        .offset(y: animateIn ? 0 : 20)
+
+                        // Personal-knapp
+                        Button { visaPersonalmeny = true } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: "person.badge.key.fill")
+                                    .font(.system(size: 16, weight: .bold))
+                                    .foregroundColor(.white.opacity(0.8))
+
+                                Text("Personal")
+                                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                                    .foregroundColor(.white.opacity(0.8))
+
+                                Spacer()
+
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 13, weight: .bold))
+                                    .foregroundColor(.white.opacity(0.3))
+                            }
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 16)
+                            .background(.ultraThinMaterial)
+                            .cornerRadius(14)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 14)
+                                    .stroke(.white.opacity(0.1), lineWidth: 1)
+                            )
+                        }
+                        .sheet(isPresented: $visaPersonalmeny) {
+                            SkanningMenyView()
+                        }
+                        .opacity(animateIn ? 1 : 0)
+                        .offset(y: animateIn ? 0 : 20)
                     }
-                    .padding(.horizontal)
-                    .sheet(isPresented: $visaPersonalmeny) {
-                        SkanningMenyView()
-                    }
+                    .padding(.horizontal, 36)
 
                     Spacer()
+                        .frame(height: 50)
 
-                    // Version
-                    Text("Puls-AR v1.0")
-                        .font(.caption2)
-                        .foregroundColor(Color.white.opacity(0.2))
-                        .padding(.bottom, 20)
+                    Text("v1.0")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.white.opacity(0.15))
+                        .padding(.bottom, 12)
                 }
             }
             .navigationBarHidden(true)
+            .onAppear {
+                withAnimation(.easeOut(duration: 0.8)) {
+                    animateIn = true
+                }
+            }
         }
     }
+}
+
+#Preview {
+    ContentView()
 }

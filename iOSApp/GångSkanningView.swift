@@ -301,20 +301,6 @@ struct GångSkanningView: View {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────
-// 3D PUNKT STRUKTUR
-// ─────────────────────────────────────────────────────────────────
-
-struct Punkt3D: Codable {
-    let x: Float          // Världskoordinat X
-    let y: Float          // Världskoordinat Y (höjd)
-    let z: Float          // Världskoordinat Z
-    let u: Float          // Pixel-koordinat i bilden
-    let v: Float          // Pixel-koordinat i bilden
-    let frame: Int        // Vilken frame punkten kommer från
-    let confidence: Float // LiDAR-konfidens
-    // OBS: descriptor beräknas server-side med SuperPoint, skickas ej från iOS
-}
 
 // ─────────────────────────────────────────────────────────────────
 // MANAGER MED 3D-PUNKTINSAMLING
@@ -341,7 +327,7 @@ class GångSkanningManager: NSObject, ObservableObject, ARSessionDelegate {
     private var frameRäknare = 0
     private let sparaKö      = DispatchQueue(label: "spara", qos: .userInitiated)
     
-    // Kamera-intrinsics för PnP
+    // Kamera-intrinsics för 3D-extraktion (LANDSCAPE — ARKit/LiDAR native)
     private var fx: Float = 0
     private var fy: Float = 0
     private var cx: Float = 0
@@ -352,7 +338,7 @@ class GångSkanningManager: NSObject, ObservableObject, ARSessionDelegate {
     // ─────────────────────────────────────────────
     private let maxPunkterPerFrame = 300      // 300 räcker gott för lokalisering
     private let maxTotalaPunkter = 500000     // 500k ger ~5+ minuter
-    private let samplingStep = 12             // Glesare sampling, snabbare     
+    private let samplingStep = 12             // Glesare sampling, snabbare
 
     func starta(gång: String) {
         gångNamn = gång
@@ -422,19 +408,48 @@ class GångSkanningManager: NSObject, ObservableObject, ARSessionDelegate {
         guard let mapp = skanningsmapp else { return }
         let bildIndex = frameRäknare / 5
         
-        // Kameraposition
-        let t = frame.camera.transform
-        let camX = t.columns.3.x + startaOffset.0
+        // ─── Kameratransform (i kartans frame, med offset) ───
+
+        var t = frame.camera.transform
+        t.columns.3.x += startaOffset.0
+        t.columns.3.z += startaOffset.1
+
+        let camX = t.columns.3.x
         let camY = t.columns.3.y
-        let camZ = t.columns.3.z + startaOffset.1
-        
-        // Spara intrinsics
+        let camZ = t.columns.3.z
+
+        // Flatta 4x4 kolumn-major för JSON (ARKit world_from_camera)
+        let transformArr: [Float] = [
+            t.columns.0.x, t.columns.0.y, t.columns.0.z, t.columns.0.w,
+            t.columns.1.x, t.columns.1.y, t.columns.1.z, t.columns.1.w,
+            t.columns.2.x, t.columns.2.y, t.columns.2.z, t.columns.2.w,
+            t.columns.3.x, t.columns.3.y, t.columns.3.z, t.columns.3.w
+        ]
+
+        // ─── Intrinsics: ARKit ger landscape, bilden sparas portrait ───
+
         let intrinsics = frame.camera.intrinsics
-        fx = intrinsics[0][0]
-        fy = intrinsics[1][1]
-        cx = intrinsics[2][0]
-        cy = intrinsics[2][1]
-        
+        let fx_landscape = intrinsics[0][0]
+        let fy_landscape = intrinsics[1][1]
+        let cx_landscape = intrinsics[2][0]
+        let cy_landscape = intrinsics[2][1]
+
+        // Behåll landscape för 3D-extraktion (extrahera3DPunkter använder dessa)
+        fx = fx_landscape
+        fy = fy_landscape
+        cx = cx_landscape
+        cy = cy_landscape
+
+        // Konvertera till portrait (90° CW rotation):
+        //   fx_P = fy_L, fy_P = fx_L (axlarna byter plats)
+        //   cx_P = H_L - cy_L, cy_P = cx_L
+        let imageW_L = Float(CVPixelBufferGetWidth(frame.capturedImage))
+        let imageH_L = Float(CVPixelBufferGetHeight(frame.capturedImage))
+        let fx_portrait = fy_landscape
+        let fy_portrait = fx_landscape
+        let cx_portrait = imageH_L - cy_landscape
+        let cy_portrait = cx_landscape
+
         // Drift-beräkning
         if startPosition == nil { startPosition = (camX, camZ) }
         if let (sx, sz) = startPosition {
@@ -468,17 +483,20 @@ class GångSkanningManager: NSObject, ObservableObject, ARSessionDelegate {
             self?.sparaFrame(pixelBuffer, index: bildIndex, till: mapp)
         }
         
-        // Spara metadata
+        // Spara metadata (PORTRAIT intrinsics + full transform)
         let position: [String: Any] = [
             "frame": bildIndex,
             "x": camX,
             "y": camY,
             "z": camZ,
             "rot_y": frame.camera.eulerAngles.y,
-            "fx": fx,
-            "fy": fy,
-            "cx": cx,
-            "cy": cy,
+            "transform": transformArr,                // 4x4 ARKit world_from_camera, kolumn-major
+            "fx": fx_portrait,                        // Portrait — matchar sparad JPEG
+            "fy": fy_portrait,
+            "cx": cx_portrait,
+            "cy": cy_portrait,
+            "image_width": imageH_L,                  // Portrait bredd (= landscape höjd)
+            "image_height": imageW_L,                 // Portrait höjd (= landscape bredd)
             "gång": gångNamn,
             "har_lidar": frame.sceneDepth != nil,
             "antal_3d_punkter": nya3DPunkter.count
@@ -565,11 +583,12 @@ class GångSkanningManager: NSObject, ObservableObject, ARSessionDelegate {
                 let u_portrait = Float(imageHeight) - v_landscape
                 let v_portrait = u_landscape
                 
-                // Skapa punkt
+                // Skapa punkt. cameraTransform innehåller redan startaOffset,
+                // så worldPoint är i kartans frame direkt.
                 let punkt = Punkt3D(
-                    x: worldPoint.x + startaOffset.0,
+                    x: worldPoint.x,
                     y: worldPoint.y,
-                    z: worldPoint.z + startaOffset.1,
+                    z: worldPoint.z,
                     u: u_portrait,   // Portrait för SuperPoint-matchning
                     v: v_portrait,
                     frame: frameIndex,
