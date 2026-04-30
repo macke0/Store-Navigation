@@ -31,7 +31,7 @@ def _ladda_positioner():
     global _positioner_cache, _positioner_tid
     import os, time
     
-    prod_path = Path("/tmp/butik_modell/identifierade_produkter.json")
+    prod_path = Path("/home/hartman/ICA_ai/BackendPulsAr/data/butik_modell/identifierade_produkter.json")
     if not prod_path.exists():
         return {}
     

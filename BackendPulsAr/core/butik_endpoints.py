@@ -121,6 +121,8 @@ async def ladda_upp_batch(
     positioner: str = Form("[]"),
     punkter_3d: str = Form("[]"),
     frames: List[UploadFile] = File(default=[]),
+    mesh: List[UploadFile] = File(default=[]),
+    karta_id: str = Form(None),
 ):
     """
     Ladda upp en batch av frames + data till en session.
@@ -154,6 +156,23 @@ async def ladda_upp_batch(
         batch_index=batch_index,
     )
     
+    # Lägg till mesh-filer (kommer i sista batchen)
+    if mesh:
+        mesh_data = []
+        for mesh_fil in mesh:
+            content = await mesh_fil.read()
+            mesh_data.append((mesh_fil.filename, content))
+        
+        butik.lägg_till_mesh(
+            session_id=session.session_id,
+            mesh_filer=mesh_data,
+        )
+        print(f"   📦 Sparade {len(mesh_data)} mesh-filer för session {session.session_id}")
+    
+    # Spara karta_id om det skickas (för multi-session)
+    if karta_id:
+        butik.sätt_karta_id(session.session_id, karta_id)
+    
     return {
         "status": "ok",
         "session_id": session.session_id,
@@ -162,7 +181,6 @@ async def ladda_upp_batch(
         "totalt_frames": session.antal_frames,
         "totalt_punkter": session.antal_punkter,
     }
-
 
 @router.post("/bygg-karta")
 async def bygg_karta(background_tasks: BackgroundTasks):

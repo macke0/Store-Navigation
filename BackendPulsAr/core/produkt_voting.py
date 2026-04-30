@@ -17,8 +17,8 @@ from pathlib import Path
 from collections import Counter
 from typing import List, Dict, Optional
 
-MANUELLA_PATH = Path("/tmp/butik_modell/manuella_korrigeringar.json")
-PRODUKTER_PATH = Path("/tmp/butik_modell/identifierade_produkter.json")
+MANUELLA_PATH = Path("/home/hartman/ICA_ai/BackendPulsAr/data/butik_modell/manuella_korrigeringar.json")
+PRODUKTER_PATH = Path("/home/hartman/ICA_ai/BackendPulsAr/data/butik_modell/identifierade_produkter.json")
 
 # Avstånd i meter för att räknas som "samma position"
 POSITION_TRÖSKEL = 0.5  

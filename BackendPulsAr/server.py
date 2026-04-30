@@ -48,6 +48,46 @@ from core.viewer_3d import router as viewer_3d_router
 from core.butik_endpoints import router as butik_router
 from core.produkt_edit_endpoints import router as edit_router
 
+from core.butik_kalibrering import (
+    spara_kalibrering,
+    ladda_kalibrering,
+    vps_till_pixel,
+    pixel_till_vps,
+    spara_kartbild,
+    hämta_kartbild_path,
+    butik_status,
+    lista_butiker,
+)
+from fastapi.responses import FileResponse
+from pydantic import BaseModel
+from typing import List, Optional
+
+from core.multi_session import (
+    preflight,
+    lägg_till_session,
+    lista_kartor as lista_alla_kartor,
+)
+
+
+class Referenspunkt(BaseModel):
+    vps: List[float]
+    pixel: List[float]
+    beskrivning: Optional[str] = None
+
+
+class KalibreraRequest(BaseModel):
+    referenspunkter: List[Referenspunkt]
+
+
+class VpsKoordinat(BaseModel):
+    x: float
+    z: float
+
+
+class PixelKoordinat(BaseModel):
+    pixel_x: float
+    pixel_y: float
+
 # ─────────────────────────────────────────────────────────────────────────────
 # SETUP
 # ─────────────────────────────────────────────────────────────────────────────
@@ -225,9 +265,27 @@ async def lokalisera(
     gång_namn: str        = Form(None)
 ):
     """Lokaliserar kund baserat på kamerabild via VPS."""
+    import os
+    with open("/tmp/vps_debug_test.txt", "w") as _f:
+        _f.write("endpoint nådd")
+    print("🔴 LOKALISERA ENDPOINT NÅDD")
     bild_bytes = await bild.read()
+    # DEBUG: spara bilden som iOS skickar
+    with open("/tmp/debug_vps_image.jpg", "wb") as f:
+        f.write(bild_bytes)
+    import cv2, numpy as np
+    img_debug = cv2.imdecode(np.frombuffer(bild_bytes, np.uint8), cv2.IMREAD_COLOR)
+    if img_debug is not None:
+        print(f"📷 Mottagen bild: {img_debug.shape[1]}x{img_debug.shape[0]}, {len(bild_bytes)//1024} KB")
+    else:
+        print(f"📷 Kunde inte läsa bilden! {len(bild_bytes)} bytes")
     resultat   = lokalisera_kund(bild_bytes, gång_namn)
-    print(f"📍 Lokalisering: {resultat}")
+    if resultat.get("success") or resultat.get("x") is not None:
+        print(f"   📍 Position: x={resultat.get('x', 0):.2f}, y={resultat.get('y', 0):.2f}, z={resultat.get('z', 0):.2f}")
+        print(f"   🧭 Yaw: {resultat.get('yaw', resultat.get('rotation', 0)):.1f}°")
+        print(f"   🎯 Inliers: {resultat.get('inliers', '?')}")
+    else:
+        print(f"   ❌ Lokalisering misslyckades: {resultat}")
     return resultat
 
 @app.get("/ankarpunkter/")
@@ -242,59 +300,52 @@ async def hämta_ankarpunkter():
 @app.post("/skanna-video/")
 async def skanna_video(
     request: Request,
-    frames:     List[UploadFile] = File(default=[]),
-    positioner: str              = Form(...),
-    punkter_3d: str              = Form("[]"),
+    frames: List[UploadFile] = File(default=[]),
+    positioner: str = Form(...),
+    punkter_3d: str = Form("[]"),
+    karta_id: str = Form(None),
 ):
-    # Sätts här för att överskriva default
+    """Tar emot skanning och bygger eller mergar kartan."""
     from starlette.formparsers import MultiPartParser
     MultiPartParser.max_part_size = 1024 * 1024 * 500
-    skanning_id  = f"skanning_{int(time.time())}"
+    
+    skanning_id = f"skanning_{int(time.time())}"
     skanning_dir = f"/tmp/{skanning_id}"
     os.makedirs(skanning_dir, exist_ok=True)
-
+    
     for frame in frames:
         frame_path = f"{skanning_dir}/{frame.filename}"
         with open(frame_path, "wb") as f:
             shutil.copyfileobj(frame.file, f)
-
+    
     pos_data = json.loads(positioner)
-    punkter_data = json.loads(punkter_3d) 
-
+    punkter_data = json.loads(punkter_3d)
+    
     korrigerade_pos, closure_info = korrigera_loop_closure(pos_data)
     if not closure_info["korrigerad"]:
         korrigerade_pos = pos_data
-
+    
     with open(f"{skanning_dir}/positioner.json", "w") as f:
         json.dump(korrigerade_pos, f)
-
     with open(f"{skanning_dir}/punkter_3d.json", "w") as f:
         json.dump(punkter_data, f)
-
-    # Spara mappning gångnamn → skanningmapp
-    # Varför: Så att vi kan hitta positionerna för en specifik gång senare
-    gång_namn = pos_data[0].get("gång", "okänd") if pos_data else "okänd"
-    gång_index_fil = "/tmp/gång_index.json"
-    if os.path.exists(gång_index_fil):
-        with open(gång_index_fil) as f:
-            gång_index = json.load(f)
-    else:
-        gång_index = {}
-    gång_index[gång_namn] = skanning_dir
-    with open(gång_index_fil, "w") as f:
-        json.dump(gång_index, f)
-
-    print(f"📥 Skanning mottagen: {skanning_id} ({gång_namn})")
-    print(f"   {len(frames)} frames, {len(pos_data)} positioner")
-    print(f"   {len(punkter_data)} 3D-punkter")
-
-    if punkter_data:
-        from core.vps_3d import bygg_3d_karta
-        asyncio.create_task(bygg_3d_karta_async(skanning_dir, punkter_data, korrigerade_pos, gång_namn))
-    else:
-        asyncio.create_task(analysera_skanning(skanning_dir, korrigerade_pos))
-
-    return {"message": "Mottagen", "id": skanning_id, "punkter_3d": len(punkter_data)}
+    
+    print(f"📥 Skanning mottagen: {skanning_id}")
+    print(f"   {len(frames)} frames, {len(pos_data)} positioner, {len(punkter_data)} 3D-punkter")
+    print(f"   karta_id: {karta_id or 'NY KARTA'}")
+    
+    förväntat_karta = karta_id if karta_id else None
+    
+    resultat = lägg_till_session(
+        session_dir=skanning_dir,
+        punkter_3d=punkter_data,
+        positioner=korrigerade_pos,
+        session_id=skanning_id,
+        förväntat_karta_id=förväntat_karta,
+        verbose=True,
+    )
+    
+    return resultat
 
 async def bygg_3d_karta_async(skanning_dir, punkter_data, positioner, gång_namn):
     """Wrapper för att köra kartbygge async."""
@@ -304,6 +355,31 @@ async def bygg_3d_karta_async(skanning_dir, punkter_data, positioner, gång_namn
         bygg_3d_karta(skanning_dir, punkter_data, positioner, gång_namn)
     except Exception as e:
         print(f"❌ Kartbygge misslyckades: {e}")
+
+async def lägg_till_session_async(
+    skanning_dir,
+    punkter_data,
+    positioner,
+    session_id,
+    karta_id
+):
+    """Wrapper för att köra multi-session pipeline async."""
+    try:
+        from core.multi_session import lägg_till_session
+        print(f"🔧 Multi-session: bygger karta för {session_id}...")
+        resultat = lägg_till_session(
+            session_dir=skanning_dir,
+            punkter_3d=punkter_data,
+            positioner=positioner,
+            session_id=session_id,
+            förväntat_karta_id=karta_id,
+            verbose=True,
+        )
+        print(f"   Resultat: {resultat}")
+    except Exception as e:
+        import traceback
+        print(f"❌ Multi-session misslyckades: {e}")
+        traceback.print_exc()
 
 def rensa_qwen_svar(text: str) -> str:
     text = re.sub(r'\*+', '', text)
@@ -860,6 +936,8 @@ async def skanna_video_batch(
     frames:        List[UploadFile] = File(default=[]),
     positioner:    str              = Form("[]"),
     punkter_3d:    str              = Form("[]"),
+    karta_id:      str              = Form(None),
+    mesh:          List[UploadFile] = File(default=[]),
 ):
     """Ta emot en batch av frames och 3D-punkter."""
     
@@ -872,8 +950,13 @@ async def skanna_video_batch(
             "frames": [],
             "positioner": [],
             "punkter_3d": [],
-            "received_batches": 0
+            "received_batches": 0,
+            "karta_id": None
         }
+    
+    # Spara karta_id om det skickas (kan komma i vilken batch som helst)
+    if karta_id:
+        batch_storage[skanning_id]["karta_id"] = karta_id
     
     storage = batch_storage[skanning_id]
     
@@ -888,6 +971,19 @@ async def skanna_video_batch(
         with open(frame_path, "wb") as f:
             f.write(content)
         storage["frames"].append(frame_path)
+    
+    # Spara mesh-filer (kommer i sista batchen)
+    if mesh:
+        mesh_dir = f"{skanning_dir}/mesh"
+        os.makedirs(mesh_dir, exist_ok=True)
+        
+        for mesh_fil in mesh:
+            mesh_path = f"{mesh_dir}/{mesh_fil.filename}"
+            content = await mesh_fil.read()
+            with open(mesh_path, "wb") as f:
+                f.write(content)
+        
+        print(f"   📦 Sparade {len(mesh)} mesh-filer till {mesh_dir}")
     
     # Lägg till positioner
     try:
@@ -950,11 +1046,16 @@ async def skanna_video_batch(
         # Kör loop closure
         korrigera_loop_closure(storage["positioner"])
         
-        asyncio.create_task(bygg_3d_karta_async(
-            skanning_dir,           # /tmp/skanning_xxx
-            storage["punkter_3d"],  # punkter_data
-            storage["positioner"],  # positioner  
-            gång                    # gång_namn
+        # Multi-session: använd lägg_till_session för att antingen skapa ny karta eller merga
+        använd_karta_id = storage.get("karta_id")
+        print(f"   karta_id: {använd_karta_id or 'INGEN — första skanning'}")
+        
+        asyncio.create_task(lägg_till_session_async(
+            skanning_dir,
+            storage["punkter_3d"],
+            storage["positioner"],
+            skanning_id,
+            använd_karta_id
         ))
         
         # Rensa batch storage
@@ -975,6 +1076,108 @@ async def skanna_video_batch(
         "total": total_batches
     }
 
+# =============================================
+# BUTIKSKARTA OCH KALIBRERING
+# =============================================
+ 
+@app.post("/butik/{butik_id}/kartbild")
+async def ladda_upp_kartbild(butik_id: str, bild: UploadFile = File(...)):
+    """
+    Ladda upp butikskartan (PNG/JPG).
+    Exempel: POST /butik/bromma_maxi/kartbild med filen.
+    """
+    bild_bytes = await bild.read()
+    resultat = spara_kartbild(butik_id, bild_bytes, bild.filename or "karta.png")
+    return resultat
+ 
+ 
+@app.get("/butik/{butik_id}/kartbild")
+async def hämta_kartbild(butik_id: str):
+    """Hämta butikskartan som bild."""
+    path = hämta_kartbild_path(butik_id)
+    if path is None:
+        return {"fel": "Kartbild saknas"}
+    return FileResponse(str(path))
+ 
+ 
+@app.post("/butik/{butik_id}/kalibrera")
+async def kalibrera_butik(butik_id: str, request: KalibreraRequest):
+    """
+    Kalibrera översättning mellan VPS-koordinater och kartpixlar.
+    Skicka minst 3 referenspunkter.
+    """
+    punkter = [p.dict() for p in request.referenspunkter]
+    return spara_kalibrering(butik_id, punkter)
+ 
+ 
+@app.post("/butik/{butik_id}/vps-till-pixel")
+async def översätt_vps_till_pixel(butik_id: str, koord: VpsKoordinat):
+    """
+    Översätt VPS-koordinat (x, z i meter) till pixelposition på kartan.
+    Används av iOS-klienten för att rita blå prick.
+    """
+    resultat = vps_till_pixel(butik_id, koord.x, koord.z)
+    if resultat is None:
+        return {"fel": "Butik ej kalibrerad"}
+    return resultat
+ 
+ 
+@app.post("/butik/{butik_id}/pixel-till-vps")
+async def översätt_pixel_till_vps(butik_id: str, koord: PixelKoordinat):
+    """
+    Översätt pixelposition på kartan till VPS-koordinat.
+    Används när personal trycker på kartan för att märka produktposition.
+    """
+    resultat = pixel_till_vps(butik_id, koord.pixel_x, koord.pixel_y)
+    if resultat is None:
+        return {"fel": "Butik ej kalibrerad"}
+    return resultat
+ 
+ 
+@app.get("/butik/{butik_id}")
+async def hämta_butik_status(butik_id: str):
+    """Status för en butik: har den kartbild och kalibrering?"""
+    return butik_status(butik_id)
+ 
+ 
+@app.get("/butiker")
+async def hämta_alla_butiker():
+    """Lista alla konfigurerade butiker."""
+    return {"butiker": lista_butiker()}
+
+
+@app.post("/preflight")
+async def preflight_endpoint(bild: UploadFile = File(...)):
+    """
+    Identifiera vilken karta användaren är vid innan skanning.
+    """
+    bild_bytes = await bild.read()
+    print(f"📍 Preflight: {len(bild_bytes)//1024} KB")
+    
+    resultat = preflight(bild_bytes)
+    print(f"   Status: {resultat.get('status')}, karta: {resultat.get('karta_id')}, inliers: {resultat.get('inliers', '?')}")
+    
+    return resultat
+
+
+@app.get("/kartor")
+async def hämta_alla_kartor():
+    """Lista alla befintliga kartor."""
+    kartor = lista_alla_kartor()
+    info = []
+    for namn in kartor:
+        karta_dir = Path(f"/home/hartman/ICA_ai/BackendPulsAr/data/kartor/{namn}")
+        meta_path = karta_dir / "metadata.json"
+        if meta_path.exists():
+            with open(meta_path) as f:
+                meta = json.load(f)
+            info.append({
+                "namn": namn,
+                "antal_frames": len(meta.get("frames", [])),
+                "antal_sessioner": len(meta.get("session_log", [])),
+            })
+    return {"kartor": info}
+    
 # ─────────────────────────────────────────────────────────────────────────────
 # START
 # ─────────────────────────────────────────────────────────────────────────────

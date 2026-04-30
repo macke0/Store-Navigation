@@ -97,7 +97,7 @@ class Karta3DCache:
             return cls._kartor[gång_namn]
         
         säker_namn = gång_namn.replace(" ", "_").replace("/", "_")
-        karta_dir = Path(f"/tmp/kartor_3d/{säker_namn}")
+        karta_dir = Path(f"/home/hartman/ICA_ai/BackendPulsAr/data/kartor/{säker_namn}")
         
         if not (karta_dir / "metadata.json").exists():
             return None
@@ -170,7 +170,7 @@ class Karta3DCache:
     
     @classmethod
     def lista(cls) -> List[str]:
-        kartor_dir = Path("/tmp/kartor_3d")
+        kartor_dir = Path("/home/hartman/ICA_ai/BackendPulsAr/data/kartor")
         if not kartor_dir.exists():
             return []
         return [
@@ -200,7 +200,7 @@ def bygg_3d_karta(
     print(f"🗺️  Bygger 3D-karta för {gång_namn}...")
     
     säker_namn = gång_namn.replace(" ", "_").replace("/", "_")
-    karta_dir = Path(f"/tmp/kartor_3d/{säker_namn}")
+    karta_dir = Path(f"/home/hartman/ICA_ai/BackendPulsAr/data/kartor/{säker_namn}")
     karta_dir.mkdir(parents=True, exist_ok=True)
     
     # Hitta frames
@@ -244,7 +244,7 @@ def bygg_3d_karta(
     
     for frame_file in frame_files:
         frame_id = int(frame_file.stem.replace("frame_", ""))
-        frame_punkter = punkter_per_frame.get(frame_id + 1, [])  # iOS är 1-indexerat
+        frame_punkter = punkter_per_frame.get(frame_id, [])
         
         # Extrahera features
         try:
@@ -290,6 +290,15 @@ def bygg_3d_karta(
         np.save(frame_dir / "points_3d.npy", points_3d)
         np.save(frame_dir / "has_3d.npy", has_3d)
         
+        # Spara ARKit-pose för denna frame (för BA initial_poses)
+        pos_dict = next((p for p in positioner if p.get("frame") == frame_id), None)
+        if pos_dict and "transform" in pos_dict:
+            # Flat [16] column-major → 4x4 row-major numpy
+            transform_flat = np.array(pos_dict["transform"], dtype=np.float32)
+            if transform_flat.size == 16:
+                pose_arkit = transform_flat.reshape(4, 4, order='F')  # Fortran = column-major
+                np.save(frame_dir / "pose_arkit.npy", pose_arkit)
+                
         # Samla för index
         frame_ids_list.append(frame_id)
         frame_mean_descriptors.append(descriptors.mean(axis=0))
@@ -458,7 +467,7 @@ def lokalisera(
     if bästa_resultat is None:
         return {
             "hittad": False,
-            "anledning": "Ingen matchning",
+            "anledning": "Ingen karta matchade",
             "sökta_kartor": kartor_att_söka,
             "debug": {
                 "extract_ms": round(t_extract * 1000, 1),
@@ -516,9 +525,12 @@ def _lokalisera_mot_karta(
     
     if matcher is not None:
         # Hitta BÄSTA frame (mest matcher med 3D)
+        print(f"   🔍 LightGlue: matchar {len(candidate_frame_ids)} frames...")
+        frames_testade = 0
         for fid in candidate_frame_ids:
             if fid not in karta.frames:
                 continue
+            frames_testade += 1
             frame_data = karta.frames[fid]
             
             db_kp = torch.from_numpy(frame_data.keypoints).float().unsqueeze(0).to(device)
@@ -562,6 +574,9 @@ def _lokalisera_mot_karta(
                     print(f"   LightGlue fel för frame {fid}: {e}")
                 continue
     
+    if matcher is not None:
+        print(f"   📊 Testade {frames_testade} frames, bästa: frame {best_frame_id} med {best_frame_matches} 3D-matcher")
+    
     else:
         # Fallback: FAISS nearest neighbor (ratio test)
         query_norm = query_desc.copy().astype(np.float32)
@@ -599,13 +614,11 @@ def _lokalisera_mot_karta(
     points_2d = np.array(all_points_2d, dtype=np.float64)
     points_3d = np.array(all_points_3d, dtype=np.float64)
     
+    # Intrinsics kommer redan i portrait från iOS
     fx = intrinsics.get("fx", 1000)
     fy = intrinsics.get("fy", 1000)
-    # Portrait intrinsics (bild roterad 90° clockwise)
-    cx_land = intrinsics.get("cx", 960)
-    cy_land = intrinsics.get("cy", 720)
-    cx = 1440 - cy_land  # portrait cx
-    cy = cx_land         # portrait cy
+    cx = intrinsics.get("cx", 540)
+    cy = intrinsics.get("cy", 960)
     
     camera_matrix = np.array([
         [fx,  0, cx],
@@ -618,7 +631,7 @@ def _lokalisera_mot_karta(
     success, rvec, tvec, inliers = cv2.solvePnPRansac(
         points_3d, points_2d,
         camera_matrix, dist_coeffs,
-        reprojectionError=4.0,
+        reprojectionError=16.0,
         iterationsCount=2000,
         confidence=0.995,
         flags=cv2.SOLVEPNP_EPNP
@@ -626,7 +639,7 @@ def _lokalisera_mot_karta(
     
     t_pnp = time.time() - t0
     
-    if not success or inliers is None or len(inliers) < 15:
+    if not success or inliers is None or len(inliers) < 8:
         return {
             "hittad": False,
             "anledning": f"PnP misslyckades (inliers: {len(inliers) if inliers is not None else 0})",
@@ -648,8 +661,13 @@ def _lokalisera_mot_karta(
     if sy > 1e-6:
         roll = np.arctan2(R[2, 1], R[2, 2])
         pitch = np.arctan2(-R[2, 0], sy)
-        # Yaw runt Y-axeln (matchar ARKit)
-        yaw = -np.arctan2(-R[2, 0], R[2, 2])
+        # Yaw från camera-to-world-rotation (R.T), runt ARKit Y-axeln
+        # R.T är camera-in-world. Kolumn 2 av R.T = kamerans forward i world
+        # I ARKit: forward är -Z. Yaw = vilket håll kameran pekar i XZ-planet.
+        R_cw = R.T  # camera-to-world
+        forward = R_cw[:, 2]  # kamerans Z-axel i world (pekar bakåt i ARKit-konvention)
+        # För ARKit-yaw: använd -forward (framåtriktningen) i XZ-plan
+        yaw = np.arctan2(-forward[0], -forward[2])
     else:
         roll = np.arctan2(-R[1, 2], R[1, 1])
         pitch = np.arctan2(-R[2, 0], sy)

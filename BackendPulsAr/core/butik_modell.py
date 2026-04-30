@@ -10,7 +10,7 @@ Principer:
   - Pause/resume: varje session har eget ID, kan fortsättas
   
 Struktur på disk:
-  /tmp/butik_modell/
+  /home/hartman/ICA_ai/BackendPulsAr/data/butik_modell/
   ├── sessioner/
   │   ├── session_1713000000/
   │   │   ├── frames/          (frame_0.jpg, frame_1.jpg, ...)
@@ -38,7 +38,7 @@ from typing import Optional, List, Dict
 from dataclasses import dataclass, field
 
 
-BUTIK_DIR = Path("/tmp/butik_modell")
+BUTIK_DIR = Path("/home/hartman/ICA_ai/BackendPulsAr/data/butik_modell")
 
 
 @dataclass
@@ -259,6 +259,43 @@ class ButikModell:
         self._spara_metadata()
         print(f"   📥 Batch {batch_index}: +{len(frames)} frames, +{len(punkter_3d)} punkter")
     
+    def lägg_till_mesh(
+        self,
+        session_id: str,
+        mesh_filer: List[tuple],  # [(filename, bytes), ...]
+    ):
+        """
+        Lägg till mesh-filer till en session.
+        Sparas i sessionsmappens 'mesh'-undermapp.
+        """
+        session = self.sessioner.get(session_id)
+        if not session:
+            print(f"⚠️ Session {session_id} finns inte (mesh)")
+            return
+        
+        mesh_dir = session.session_dir / "mesh"
+        mesh_dir.mkdir(parents=True, exist_ok=True)
+        
+        for filename, data in mesh_filer:
+            mesh_path = mesh_dir / filename
+            with open(mesh_path, "wb") as f:
+                f.write(data)
+    
+    def sätt_karta_id(self, session_id: str, karta_id: str):
+        """Sätt vilken karta sessionen ska kopplas till."""
+        session = self.sessioner.get(session_id)
+        if not session:
+            return
+        
+        # Spara i metadata
+        meta_path = session.session_dir / "metadata.json"
+        meta = {}
+        if meta_path.exists():
+            with open(meta_path) as f:
+                meta = json.load(f)
+        meta["karta_id"] = karta_id
+        with open(meta_path, "w") as f:
+            json.dump(meta, f)
     # ─────────────────────────────────────────────
     # GLOBAL KARTA
     # ─────────────────────────────────────────────
@@ -382,36 +419,9 @@ class ButikModell:
                 self._spara_metadata()
                 print(f"✅ Global karta byggd (version {self.global_karta_version})")
                 
-                # Identifiera produkter
-                uppdatera_progress("Identifierar produkter", 70)
-                print(f"\n🔍 Startar produktidentifiering...")
-                # Använd ALLA frames från sessioner (inte samplade)
-                from core.produkt_pipeline import kör_pipeline
-                alla_pos = []
-                alla_pkt = []
-                original_frames = BUTIK_DIR / "alla_original_frames"
-                if original_frames.exists():
-                    shutil.rmtree(original_frames)
-                original_frames.mkdir()
-                for sid, session in sorted(self.sessioner.items()):
-                    if session.status not in ("klar", "pausad"):
-                        continue
-                    pp = session.session_dir / "positioner.json"
-                    if pp.exists():
-                        with open(pp) as f:
-                            alla_pos.extend(json.load(f))
-                    pk = session.session_dir / "punkter_3d.json"
-                    if pk.exists():
-                        with open(pk) as f:
-                            alla_pkt.extend(json.load(f))
-                    fd = session.frames_dir
-                    if fd.exists():
-                        for ff in fd.glob("*.jpg"):
-                            shutil.copy2(ff, original_frames / ff.name)
-                produkter = kör_pipeline(str(original_frames), alla_pos, alla_pkt)
-                if original_frames.exists():
-                    shutil.rmtree(original_frames)
-                print(f"✅ {len(produkter)} produkter identifierade och sparade")
+               # Produktidentifiering är flyttad till Läge 2 (produkt-skanning)
+                # Vid kart-skanning bygger vi bara den fysiska kartan
+                print(f"\n⏭️  Hoppar över produktidentifiering (görs i Läge 2)")
                 
                 # Rensa temporära filer
                 alla_frames_dir = BUTIK_DIR / "alla_frames"

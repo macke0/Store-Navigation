@@ -122,6 +122,15 @@ async def lokalisera_endpoint(
     """Lokalisera med VPS."""
     from core.vps_3d import lokalisera
     bild_bytes = await bild.read()
+    # DEBUG: spara bilden
+    with open("/tmp/debug_vps_image.jpg", "wb") as f:
+        f.write(bild_bytes)
+    import cv2, numpy as np
+    img = cv2.imdecode(np.frombuffer(bild_bytes, np.uint8), cv2.IMREAD_COLOR)
+    if img is not None:
+        print(f"📷 VPS-bild: {img.shape[1]}x{img.shape[0]}, {len(bild_bytes)//1024} KB")
+    else:
+        print(f"📷 Kunde INTE läsa bilden! {len(bild_bytes)} bytes")
     return lokalisera(bild_bytes, gång=gång, debug=debug)
 
 
@@ -129,7 +138,7 @@ async def lokalisera_endpoint(
 async def lista_kartor():
     """Lista alla VPS-kartor."""
     kartor = []
-    kartor_dir = Path("/tmp/kartor_3d")
+    kartor_dir = Path("/home/hartman/ICA_ai/BackendPulsAr/data/kartor")
     
     if kartor_dir.exists():
         for karta_path in kartor_dir.iterdir():
@@ -152,7 +161,7 @@ async def radera_karta(gång_namn: str):
     from core.vps_3d import Karta3DCache
     
     säker_namn = gång_namn.replace(" ", "_").replace("/", "_")
-    karta_dir = Path(f"/tmp/kartor_3d/{säker_namn}")
+    karta_dir = Path(f"/home/hartman/ICA_ai/BackendPulsAr/data/kartor/{säker_namn}")
     
     if karta_dir.exists():
         shutil.rmtree(karta_dir)
@@ -172,7 +181,7 @@ async def vps_status():
     kartor = []
     
     for namn in karta_namn:
-        karta_dir = f"/tmp/kartor_3d/{namn.replace(' ', '_')}"
+        karta_dir = f"/home/hartman/ICA_ai/BackendPulsAr/data/kartor/{namn.replace(' ', '_')}"
         meta_path = f"{karta_dir}/metadata.json"
         
         if os.path.exists(meta_path):

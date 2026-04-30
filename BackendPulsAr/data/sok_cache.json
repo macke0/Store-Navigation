@@ -6400,5 +6400,30 @@
     "lattmajonnas-200g-findus",
     "lattmajonnas-460g-ica-basic",
     "lattmajonnas-460g-findus"
+  ],
+  "lättma": [
+    "lattmargarin-omega3-38--600g-becel",
+    "lattmargarin-original-39--750g-latta",
+    "lattmargarin-omega3-38--400g-becel",
+    "lattmargarin-39--600g-ica",
+    "lattmajonnas-275g-kavli",
+    "lattmajonnas-200g-findus",
+    "lattmajonnas-460g-ica-basic",
+    "lattmajonnas-460g-findus"
+  ],
+  "lättmajonn": [
+    "lattmajonnas-275g-kavli",
+    "lattmajonnas-200g-findus",
+    "lattmajonnas-460g-ica-basic",
+    "lattmajonnas-460g-findus"
+  ],
+  "nocco": [
+    "energidryck--passionite--33cl-nocco",
+    "energidryck-sunny-soda-33cl-nocco",
+    "energidryck-focus-cola-33cl-nocco",
+    "energidryck-caribbean-33cl-nocco",
+    "energidryck-summer-edition-2-33cl-nocco",
+    "energidryck-electrolyte-lemon-lime-355ml-nocco",
+    "funktionsdryck-bcaa-apple-koffeinfri-sockerfri-33cl-nocco"
   ]
 }

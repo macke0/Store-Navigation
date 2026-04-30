@@ -367,13 +367,18 @@ def optimize_map(karta_dir: str, verbose: bool = True) -> bool:
         if not frame_dir.exists():
             continue
         
-        frames_data[frame_id] = {
-            "keypoints": np.load(frame_dir / "keypoints.npy"),
-            "points_3d": np.load(frame_dir / "points_3d.npy"),
-            "has_3d": np.load(frame_dir / "has_3d.npy"),
-            "descriptors": np.load(frame_dir / "descriptors.npy"),
+    frames_data[frame_id] = {
+        "keypoints": np.load(frame_dir / "keypoints.npy"),
+        "points_3d": np.load(frame_dir / "points_3d.npy"),
+        "has_3d": np.load(frame_dir / "has_3d.npy"),
+        "descriptors": np.load(frame_dir / "descriptors.npy"),
         }
-    
+
+    # Ladda ARKit-pose om den finns
+    pose_path = frame_dir / "pose_arkit.npy"
+    if pose_path.exists():
+        frames_data[frame_id]["pose_arkit"] = np.load(pose_path)
+        
     if not frames_data:
         print("❌ Ingen frame-data hittad")
         return False
@@ -386,7 +391,16 @@ def optimize_map(karta_dir: str, verbose: bool = True) -> bool:
         cy=intr.get("cy", 960),
     )
     
-    result = bundle_adjustment(frames_data, intrinsics, verbose=verbose)
+    # Bygg initial_poses från ARKit-poser (konverterade till COLMAP-konvention)
+    initial_poses = {}
+    for fid, fdata in frames_data.items():
+        if "pose_arkit" in fdata:
+            R, t = _arkit_to_colmap_pose(fdata["pose_arkit"])
+            initial_poses[fid] = FramePose(frame_id=fid, R=R, t=t)
+
+    if verbose:
+        print(f"   {len(initial_poses)}/{len(frames_data)} frames har ARKit-pose")
+    result = bundle_adjustment(frames_data, intrinsics, initial_poses=initial_poses, verbose=verbose)
     
     if not result.success:
         print("❌ Bundle adjustment misslyckades")
@@ -477,7 +491,23 @@ def _rotation_matrix_to_quaternion(R: np.ndarray) -> np.ndarray:
         z = 0.25 * s
     
     return np.array([w, x, y, z])
-
+def _arkit_to_colmap_pose(T_wc_arkit: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Konvertera ARKit world_from_camera (4x4) till COLMAP cam_from_world (R, t).
+    
+    ARKit: Y-up, Z pekar bakåt (mot användaren)
+    COLMAP: Y-down, Z pekar framåt (in i scenen)
+    
+    Skillnaden är flip av Y och Z på kameraaxlarna.
+    """
+    flip = np.diag([1.0, -1.0, -1.0, 1.0]).astype(np.float64)
+    # Kamera-koordinatsystemet skiljer sig: högermultiplicera med flip
+    T_wc_colmap = T_wc_arkit.astype(np.float64) @ flip
+    # Invertera för att få cam_from_world
+    T_cw_colmap = np.linalg.inv(T_wc_colmap)
+    R = T_cw_colmap[:3, :3]
+    t = T_cw_colmap[:3, 3]
+    return R, t
 
 def _quaternion_to_rotation_matrix(q: np.ndarray) -> np.ndarray:
     """Konvertera quaternion [w, x, y, z] till rotationsmatris."""

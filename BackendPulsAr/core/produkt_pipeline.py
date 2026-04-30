@@ -159,7 +159,7 @@ class ProduktPipeline:
             
             # Sprida produkter lite vertikalt (hyllhöjd)
             # Uppskatta baserat på position i bildlistan
-            prod_y = 0.5 + (i / max(len(produktnamn), 1)) * 2.0
+            prod_y = cam_y - 0.3  # Hyllhöjd under kameran
             
             resultat.append({
                 "visningsnamn": match["kanoniskt_namn"],
@@ -353,7 +353,7 @@ class ProduktPipeline:
         for p in produkter:
             if p.get("id") and p["id"] in self.ica_namn:
                 ica = self.ica_namn[p["id"]]
-                p["bild_url"] = ica.get("bild_url", "")
+                p["bild_url"] = ica.get("bild_url", "") 
                 if not p.get("kategori"):
                     p["kategori"] = ica.get("kategori", "")
         

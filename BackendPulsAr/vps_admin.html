@@ -569,6 +569,7 @@
         let lokaliseradPos = null;
         let testBild = null;
         let kartaAttRadera = null;
+        let produkter = [];
 
         // Karta rendering
         let canvas, ctx;
@@ -738,11 +739,12 @@
 
             document.getElementById('mapInfo').textContent = `Laddar ${gång}...`;
 
+            // Hämta produkter för visualisering
             try {
-                // Använd ASCII-endpoint
-                const gångParam = gång.replace(/ /g, '_');
-                const resp = await fetch(`/gang/${encodeURIComponent(gångParam)}/positioner`);
-                const data = await resp.json();
+                const pResp = await fetch(`/vps/karta/${encodeURIComponent(gångParam)}/produkter`);
+                const pData = await pResp.json();
+                produkter = pData.produkter || [];
+            } catch { produkter = []; }
 
                 positioner = data.positioner || [];
                 document.getElementById('mapInfo').textContent =
@@ -958,6 +960,28 @@
                 ctx.arc(x, y, i === 0 || i === positioner.length - 1 ? 6 : 3, 0, Math.PI * 2);
                 ctx.fill();
             });
+
+            // Rita produkter (krav: produkter[] = [{visningsnamn,x,y,z,...}])
+            if (typeof produkter !== 'undefined' && produkter.length) {
+                produkter.forEach(p => {
+                    const px = centerX + (p.x || 0) * scale;
+                    const py = centerY - (p.z || 0) * scale;
+
+                    // halo enligt säkerhet
+                    const färg = p.säkerhet === 'hög'    ? '#ffd166'
+                            : p.säkerhet === 'medium' ? '#ff9f43'
+                                                        : '#888';
+                    ctx.fillStyle = färg + '55';
+                    ctx.beginPath();
+                    ctx.arc(px, py, 7, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    ctx.fillStyle = färg;
+                    ctx.beginPath();
+                    ctx.arc(px, py, 3, 0, Math.PI * 2);
+                    ctx.fill();
+                });
+            }
 
             // Rita lokaliserad position
             if (lokaliseradPos) {

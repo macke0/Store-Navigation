@@ -10,8 +10,8 @@ import json
 
 router = APIRouter(tags=["Scan Viewer"])
 
-BUTIK_DIR = Path("/tmp/butik_modell")
-KARTOR_DIR = Path("/tmp/kartor_3d")
+BUTIK_DIR = Path("/home/hartman/ICA_ai/BackendPulsAr/data/butik_modell")
+KARTOR_DIR = Path("/home/hartman/ICA_ai/BackendPulsAr/data/kartor")
 
 
 @router.get("/viewer", response_class=HTMLResponse)

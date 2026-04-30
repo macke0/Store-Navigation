@@ -344,6 +344,25 @@ def setup_vps_routes(app: FastAPI):
         
         return {"skanningar": skanningar}
     
+    @router.post("/produkter/extrahera/")
+    async def extrahera_produkter_endpoint(
+        bild: UploadFile = File(...),
+        gång: str = Form(...),
+        frame_lidar: str = Form("[]"),   # JSON-array av {u,v,x,y,z}
+    ):
+        from core.produkt_extraktion import extrahera_produkter_frame, spara_produkter
+        bytes_ = await bild.read()
+        lidar = json.loads(frame_lidar)
+        nya = extrahera_produkter_frame(bytes_, lidar, gång)
+        info = spara_produkter(gång, nya)
+        return {"hittad": len(nya) > 0, "produkter": nya, **info}
+
+
+    @router.get("/vps/karta/{gång_namn}/produkter")
+    async def lista_produkter(gång_namn: str):
+        from core.produkt_extraktion import läs_produkter
+        return {"produkter": läs_produkter(gång_namn)}
+    
     
     print("✅ VPS och Debug endpoints registrerade")
     print("   📍 /vps/admin    — Admin-gränssnitt")
