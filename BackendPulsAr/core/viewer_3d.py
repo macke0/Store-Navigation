@@ -101,10 +101,11 @@ body{background:#0a0a0a;color:#e0e0e0;overflow:hidden;height:100vh;
 <div id="app">
   <div class="topbar">
     <a href="/viewer">← Tillbaka</a>
-    <span class="topbar-title">Puls-AR 3D</span>
+    <span class="topbar-title">Puls-AR 3D <span id="gångLabel" style="color:#888;font-weight:400"></span></span>
     <button class="mode-btn active" id="mOrbit" onclick="setMode('orbit')">Orbit</button>
     <button class="mode-btn" id="mWalk" onclick="setMode('walk')">Walk</button>
     <span class="stat" id="statTxt"></span>
+    <span class="stat" id="livePosTxt" style="color:#00aaff"></span>
   </div>
   <div class="main">
     <div id="canvasWrap">
@@ -131,11 +132,18 @@ body{background:#0a0a0a;color:#e0e0e0;overflow:hidden;height:100vh;
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
 const API = window.location.origin;
+// Vilken gång ska visas? ?gång=mjölk_gång — fallback hela_butiken
+const gång = new URLSearchParams(window.location.search).get('gång') || 'hela_butiken';
+document.getElementById('gångLabel').textContent = '· ' + gång;
+
 let scene, cam, renderer, raycaster = new THREE.Raycaster(), mouse = new THREE.Vector2();
 let positioner=[], produkter=[], frames=[];
 let pathDots=[], prodMeshes=[];
 let mode='orbit', walkIdx=0, selectedFrameIdx=-1;
 let mmBounds={};
+
+// Live-position state (rapporterad av iOS-app eller web-test)
+let livePosMesh=null, livePosArrow=null, livePosLastT=0;
 
 // Orbit state
 let orb = {r:12, phi:Math.PI/3.5, theta:0};
@@ -177,12 +185,28 @@ async function init(){
   const grid = new THREE.GridHelper(80, 80, 0x161616, 0x101010);
   scene.add(grid);
 
-  // Data
+  // Data: positioner + frames + batch-produkter från viewer/data
   try{
-    const r = await fetch(`${API}/viewer/data/hela_butiken`);
+    const r = await fetch(`${API}/viewer/data/${encodeURIComponent(gång)}`);
     const d = await r.json();
     positioner=d.positioner||[]; produkter=d.produkter||[]; frames=d.frames||[];
-  }catch(e){console.error(e)}
+  }catch(e){console.error('viewer/data:',e)}
+
+  // Live-extraherade produkter — slå ihop med batch
+  // Schema: {visningsnamn, x, y, z, säkerhet, ...} (från produkt_extraktion.py)
+  // Mappar säkerhet → konfidens så färgkodningen funkar
+  try{
+    const r2 = await fetch(`${API}/vps/karta/${encodeURIComponent(gång)}/produkter`);
+    if(r2.ok){
+      const d2 = await r2.json();
+      const liveProd = (d2.produkter||[]).map(p => {
+        const sak = (p.säkerhet||'').toLowerCase();
+        const konf = sak==='hög' ? 0.9 : sak==='medium' ? 0.6 : sak==='låg' ? 0.3 : (p.konfidens||0.5);
+        return Object.assign({konfidens: konf, källa: 'live'}, p);
+      });
+      produkter = produkter.concat(liveProd);
+    }
+  }catch(e){console.error('live produkter:',e)}
 
   buildPath();
   buildProducts();
@@ -196,6 +220,56 @@ async function init(){
 
   setupEvents();
   animate();
+
+  // Starta poll-loop för live-position (1 Hz)
+  pollLivePos();
+  setInterval(pollLivePos, 1000);
+}
+
+// ── LIVE POSITION ──
+async function pollLivePos(){
+  try{
+    const r = await fetch(`${API}/vps/karta/${encodeURIComponent(gång)}/lokalisering-senaste`);
+    if(!r.ok){
+      // Ingen färsk position — ta bort dot om den finns
+      if(livePosMesh){scene.remove(livePosMesh); livePosMesh=null}
+      if(livePosArrow){scene.remove(livePosArrow); livePosArrow=null}
+      document.getElementById('livePosTxt').textContent='';
+      return;
+    }
+    const d = await r.json();
+    if(typeof d.x !== 'number') return;
+
+    const x=d.x, y=(typeof d.y==='number'?d.y:1.5), z=d.z, yaw=(d.yaw||0);
+
+    if(!livePosMesh){
+      // Skapa blå sfär + glow + beam ner till golvet
+      const geo=new THREE.SphereGeometry(0.18,18,14);
+      const mat=new THREE.MeshPhongMaterial({color:0x00aaff,emissive:0x00aaff,
+        emissiveIntensity:0.7,transparent:true,opacity:0.95});
+      livePosMesh=new THREE.Mesh(geo,mat);
+
+      const glowGeo=new THREE.SphereGeometry(0.32,14,10);
+      const glowMat=new THREE.MeshBasicMaterial({color:0x00aaff,transparent:true,opacity:0.18});
+      livePosMesh.add(new THREE.Mesh(glowGeo,glowMat));
+
+      // Riktningspil
+      const arrowDir=new THREE.Vector3(Math.sin(yaw),0,Math.cos(yaw));
+      livePosArrow=new THREE.ArrowHelper(arrowDir, new THREE.Vector3(x,y,z), 0.6, 0x00aaff, 0.18, 0.12);
+      scene.add(livePosArrow);
+
+      scene.add(livePosMesh);
+    }
+    livePosMesh.position.set(x,y,z);
+    if(livePosArrow){
+      livePosArrow.position.set(x,y,z);
+      livePosArrow.setDirection(new THREE.Vector3(Math.sin(yaw),0,Math.cos(yaw)));
+    }
+    livePosLastT=d.t||(Date.now()/1000);
+    const ageS=(Date.now()/1000 - livePosLastT).toFixed(1);
+    document.getElementById('livePosTxt').textContent=
+      `📍 (${x.toFixed(2)}, ${z.toFixed(2)}) · ${ageS}s`;
+  }catch(e){/* tyst */}
 }
 
 // ── PATH ──
@@ -485,7 +559,7 @@ function showFrame(posIdx){
   const panel=document.getElementById('framePanel');
   panel.classList.add('open');
   document.getElementById('fpTitle').textContent=`Frame ${fid} — (${(p.x||0).toFixed(2)}, ${(p.z||0).toFixed(2)})m`;
-  document.getElementById('fpImg').src=`${API}/viewer/frame/hela_butiken/${fid}`;
+  document.getElementById('fpImg').src=`${API}/viewer/frame/${encodeURIComponent(gång)}/${fid}`;
 
   // Project products onto frame
   setTimeout(()=>projectOnFrame(posIdx),100);

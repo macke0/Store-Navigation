@@ -174,6 +174,25 @@ struct VPSTestView: View {
     
     private var kontrollPanel: some View {
         VStack(spacing: 16) {
+            // Vilken gång testar vi mot? (visas som blå dot på /viewer/3d?gång=...)
+            HStack(spacing: 8) {
+                Image(systemName: "map")
+                    .foregroundColor(.cyan)
+                Text("Gång:")
+                    .font(.caption)
+                    .foregroundColor(.white)
+                TextField("hela_butiken", text: $tester.aktivGång)
+                    .font(.caption)
+                    .foregroundColor(.white)
+                    .textFieldStyle(.plain)
+                    .autocorrectionDisabled(true)
+                    .textInputAutocapitalization(.never)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(.ultraThinMaterial)
+            .cornerRadius(8)
+
             // Instruktion
             Text("Stå på en känd position och tryck 'Markera'")
                 .font(.caption)
@@ -253,7 +272,11 @@ class VPSTester: NSObject, ObservableObject, ARSessionDelegate {
     @Published var harMarkerat = false
     @Published var statusText = "Startar..."
     @Published var markeradPosition: SIMD3<Float> = .zero
-    
+
+    // Vilken gång rapporterar vi mot? Visas som blå dot på admin-3D-vyn:
+    //   /viewer/3d?gång=<aktivGång>
+    @Published var aktivGång: String = "hela_butiken"
+
     let serverURL = PulsArConfig.serverURL
     
     // ─────────────────────────────────────────────
@@ -392,9 +415,14 @@ class VPSTester: NSObject, ObservableObject, ARSessionDelegate {
             
             if hittad {
                 let vpsX = (json?["x"] as? NSNumber)?.floatValue ?? 0
+                let vpsY = (json?["y"] as? NSNumber)?.floatValue ?? 1.5
                 let vpsZ = (json?["z"] as? NSNumber)?.floatValue ?? 0
+                let vpsYaw = (json?["yaw"] as? NSNumber)?.floatValue ?? 0
                 let konfidens = json?["konfidens"] as? String ?? "okänd"
-                
+
+                // Rapportera position till admin-3D-vyn (blå dot live)
+                await rapporteraLivePosition(x: vpsX, y: vpsY, z: vpsZ, yaw: vpsYaw, konfidens: konfidens)
+
                 await MainActor.run {
                     self.registreraResultat(lyckad: true, vpsX: vpsX, vpsZ: vpsZ, konfidens: konfidens)
                 }
@@ -410,7 +438,36 @@ class VPSTester: NSObject, ObservableObject, ARSessionDelegate {
             }
         }
     }
-    
+
+    // ─────────────────────────────────────────────
+    // RAPPORTERA LIVE POSITION TILL ADMIN-3D
+    // ─────────────────────────────────────────────
+    //
+    // POST /vps/lokalisering/senaste — backend håller positionen i RAM
+    // i ~8 sek. /viewer/3d?gång=... pollar varje sek och ritar blå dot.
+    private func rapporteraLivePosition(x: Float, y: Float, z: Float, yaw: Float, konfidens: String) async {
+        let payload: [String: Any] = [
+            "gång": aktivGång,
+            "x": x, "y": y, "z": z,
+            "yaw": yaw,
+            "konfidens": konfidens,
+        ]
+        guard let body = try? JSONSerialization.data(withJSONObject: payload) else { return }
+
+        var req = URLRequest(url: URL(string: "\(serverURL)/vps/lokalisering/senaste")!)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = body
+        req.timeoutInterval = 5
+
+        do {
+            _ = try await URLSession.shared.data(for: req)
+        } catch {
+            // Tyst — primär lokalisering har redan registrerats
+            print("⚠️ Live-position-rapport misslyckades: \(error.localizedDescription)")
+        }
+    }
+
     private func registreraResultat(lyckad: Bool, vpsX: Float, vpsZ: Float, konfidens: String) {
         let resultat = VPSTestResultat(
             verkligX: Double(markeradPosition.x),

@@ -10,9 +10,16 @@ Nya funktioner:
 
 import os
 import json
-from fastapi import FastAPI, UploadFile, File, HTTPException
+import time
+from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 from fastapi.responses import HTMLResponse, JSONResponse
 from typing import Optional
+
+
+# ─── Live-lokalisering (i RAM, per gång) ─────────────────────
+# Senaste rapporterade kameraposition från en testande klient (telefon/web).
+# 3D-vyn pollar detta för att rita en blå "min position"-dot live.
+_senaste_lokalisering: dict = {}
 
 
 def setup_vps_routes(app: FastAPI):
@@ -344,7 +351,7 @@ def setup_vps_routes(app: FastAPI):
         
         return {"skanningar": skanningar}
     
-    @router.post("/produkter/extrahera/")
+    @app.post("/produkter/extrahera/")
     async def extrahera_produkter_endpoint(
         bild: UploadFile = File(...),
         gång: str = Form(...),
@@ -358,12 +365,51 @@ def setup_vps_routes(app: FastAPI):
         return {"hittad": len(nya) > 0, "produkter": nya, **info}
 
 
-    @router.get("/vps/karta/{gång_namn}/produkter")
+    @app.get("/vps/karta/{gång_namn}/produkter")
     async def lista_produkter(gång_namn: str):
         from core.produkt_extraktion import läs_produkter
         return {"produkter": läs_produkter(gång_namn)}
-    
-    
+
+
+    # ─────────────────────────────────────────────
+    # LIVE-LOKALISERING (för 3D-viewerns "min position"-dot)
+    # ─────────────────────────────────────────────
+
+    @app.post("/vps/lokalisering/senaste")
+    async def rapportera_lokalisering(payload: dict):
+        """
+        Klient (iOS-app eller web) rapporterar sin lokaliserade position.
+        Body: {gång, x, y, z, yaw, konfidens?}
+        Lagras i RAM, läses av 3D-viewern.
+        """
+        gång = payload.get("gång")
+        if not gång:
+            return JSONResponse(status_code=400, content={"error": "gång saknas"})
+        _senaste_lokalisering[gång] = {
+            "x": float(payload.get("x", 0)),
+            "y": float(payload.get("y", 1.5)),
+            "z": float(payload.get("z", 0)),
+            "yaw": float(payload.get("yaw", 0)),
+            "konfidens": payload.get("konfidens", "okänd"),
+            "t": time.time(),
+        }
+        return {"ok": True, "gång": gång}
+
+
+    @app.get("/vps/karta/{gång_namn}/lokalisering-senaste")
+    async def hämta_senaste_lokalisering(gång_namn: str):
+        """
+        3D-viewern pollar denna varje sekund.
+        Returnerar 404 om ingen position eller om den är äldre än 8 sek.
+        """
+        info = _senaste_lokalisering.get(gång_namn)
+        if not info:
+            return JSONResponse(status_code=404, content={"error": "ingen position"})
+        if time.time() - info["t"] > 8.0:
+            return JSONResponse(status_code=404, content={"error": "för gammal"})
+        return info
+
+
     print("✅ VPS och Debug endpoints registrerade")
     print("   📍 /vps/admin    — Admin-gränssnitt")
     print("   📊 /vps/status   — Karta-status")
