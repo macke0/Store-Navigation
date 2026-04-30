@@ -127,7 +127,7 @@ async def viewer_mesh(namn: str):
     if not sessioner_dirs:
         return {"error": "ingen session", "vertices": [], "faces": [], "classifications": []}
 
-    alla_verts, alla_faces, alla_class = [], [], []
+    alla_verts, alla_norms, alla_faces, alla_class = [], [], [], []
     vert_offset = 0
     for session_dir in sessioner_dirs:
         try:
@@ -142,6 +142,17 @@ async def viewer_mesh(namn: str):
                 continue
             alla_verts.append(wv)
             alla_faces.append(a.faces + vert_offset)
+            # Rotera normaler med transformens 3x3-del (utan translation)
+            try:
+                R = a.transform[:3, :3]
+                world_norms = (R @ a.normals.T).T
+                # Normalisera (ifall transform har skala)
+                lens = np.linalg.norm(world_norms, axis=1, keepdims=True)
+                lens[lens < 1e-8] = 1.0
+                world_norms = world_norms / lens
+                alla_norms.append(world_norms.astype(np.float32))
+            except Exception:
+                alla_norms.append(np.zeros_like(wv, dtype=np.float32))
             if a.classifications is not None and len(a.classifications) == len(a.faces):
                 alla_class.append(a.classifications)
             else:
@@ -152,11 +163,12 @@ async def viewer_mesh(namn: str):
         return {"error": "ingen mesh-data", "vertices": [], "faces": [], "classifications": []}
 
     verts = np.vstack(alla_verts).astype(np.float32)
+    norms = np.vstack(alla_norms).astype(np.float32)
     faces = np.vstack(alla_faces).astype(np.uint32)
     cls = np.concatenate(alla_class).astype(np.uint8) if alla_class else np.zeros(len(faces), dtype=np.uint8)
 
     # Decimera om för stort (browser-prestanda) — enkel face-sampling
-    MAX_FACES = 200_000
+    MAX_FACES = 300_000
     if len(faces) > MAX_FACES:
         step = len(faces) // MAX_FACES + 1
         faces = faces[::step]
@@ -164,6 +176,7 @@ async def viewer_mesh(namn: str):
 
     return {
         "vertices": verts.tolist(),
+        "normals": norms.tolist(),
         "faces": faces.tolist(),
         "classifications": cls.tolist(),
         "antal_v": int(len(verts)),

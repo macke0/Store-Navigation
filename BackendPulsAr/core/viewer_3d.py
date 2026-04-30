@@ -105,7 +105,7 @@ body{background:#0a0a0a;color:#e0e0e0;overflow:hidden;height:100vh;
     <button class="mode-btn active" id="mOrbit" onclick="setMode('orbit')">Orbit</button>
     <button class="mode-btn" id="mWalk" onclick="setMode('walk')">Walk</button>
     <button class="mode-btn active" id="bMesh" onclick="toggleMesh()">Mesh</button>
-    <button class="mode-btn active" id="bPoints" onclick="togglePoints()">Punkter</button>
+    <button class="mode-btn" id="bPoints" onclick="togglePoints()">Punkter</button>
     <span class="stat" id="statTxt"></span>
     <span class="stat" id="livePosTxt" style="color:#00aaff"></span>
   </div>
@@ -172,11 +172,13 @@ async function init(){
   document.getElementById('canvasWrap').prepend(renderer.domElement);
   onResize();
 
-  // Lights
-  scene.add(new THREE.AmbientLight(0xffffff, 0.5));
-  const dl = new THREE.DirectionalLight(0xffffff, 0.3);
+  // Lights — ljusare så mesh-objekt (soffor, hyllor, småsaker) syns tydligt
+  scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+  const dl = new THREE.DirectionalLight(0xffffff, 0.8);
   dl.position.set(8,15,8); scene.add(dl);
-  const hl = new THREE.HemisphereLight(0x222244, 0x111111, 0.3);
+  const dl2 = new THREE.DirectionalLight(0xffffff, 0.4);
+  dl2.position.set(-10,12,-6); scene.add(dl2);
+  const hl = new THREE.HemisphereLight(0x88aaff, 0x442211, 0.5);
   scene.add(hl);
 
   // Floor
@@ -215,7 +217,7 @@ async function init(){
 
   buildPath();
   buildProducts();
-  await buildPointCloud();
+  // Punktmoln laddas bara om användaren togglar på det (default: av)
   await buildMesh();
   centerCam();
   drawMinimap();
@@ -471,14 +473,28 @@ async function buildMesh(){
       }
     }
     geo.setAttribute('color',new THREE.BufferAttribute(vertColors,3));
-    geo.computeVertexNormals();
+
+    // Använd ARKit-normaler om de finns (ger korrekt belysning av objekt)
+    if(d.normals && d.normals.length===d.vertices.length){
+      const normals=new Float32Array(d.vertices.length*3);
+      for(let i=0;i<d.normals.length;i++){
+        normals[i*3]=d.normals[i][0];
+        normals[i*3+1]=d.normals[i][1];
+        normals[i*3+2]=d.normals[i][2];
+      }
+      geo.setAttribute('normal',new THREE.BufferAttribute(normals,3));
+      console.log('Använder ARKit-normaler');
+    } else {
+      geo.computeVertexNormals();
+      console.log('Beräknar vertex-normaler (ARKit-normaler saknas)');
+    }
 
     const mat=new THREE.MeshStandardMaterial({
       vertexColors:true,
-      roughness:0.85,
-      metalness:0.05,
-      transparent:true,
-      opacity:0.9,
+      roughness:0.7,
+      metalness:0.0,
+      transparent:false,
+      opacity:1.0,
       side:THREE.DoubleSide,
       flatShading:false,
     });
@@ -503,7 +519,13 @@ function toggleMesh(){
 
 function togglePoints(){
   const btn=document.getElementById('bPoints');
-  if(!pointsObj)return;
+  if(!pointsObj){
+    // Lazy-ladda punktmolnet första gången användaren klickar
+    buildPointCloud().then(()=>{
+      if(pointsObj){pointsObj.visible=true;btn.classList.add('active');}
+    });
+    return;
+  }
   pointsObj.visible=!pointsObj.visible;
   btn.classList.toggle('active',pointsObj.visible);
 }
