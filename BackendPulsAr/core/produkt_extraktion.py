@@ -1,5 +1,19 @@
 """
-produkt_extraktion.py — Andra scan-passet: extrahera produkter med 3D-koord
+produkt_extraktion.py — DEPRECATED (2026-05-01)
+─────────────────────────────────────────────────
+Den här modulen ersätts av core/produkt_skanning.py som driver Läge 2:
+"Skanna produkter" i iOS-appen.
+
+Skillnader:
+  - produkt_skanning.py använder A1 (Qwen-bbox + LiDAR-projektion) istället
+    för rutnäts-CLIP, vilket ger bättre per-produkt-positioner.
+  - produkt_skanning.py skriver till data/kartor/{karta}/identifierade_produkter.json
+    (samma mapp som kartan), inte /tmp/kartor_3d/{karta}/produkter.json.
+  - produkt_skanning.py kräver att iOS skickar T_arkit→karta så positioner
+    direkt hamnar i kartans frame.
+
+Behåll filen tills /produkter/extrahera/-endpointen är borttagen och inga
+äldre klienter kallar den. Tag bort efter testperiod.
 """
 
 import numpy as np

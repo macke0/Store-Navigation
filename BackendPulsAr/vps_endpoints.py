@@ -372,6 +372,145 @@ def setup_vps_routes(app: FastAPI):
 
 
     # ─────────────────────────────────────────────
+    # LÄGE 2 — PRODUKTSKANNING (A1 per frame)
+    # ─────────────────────────────────────────────
+    #
+    # iOS-flödet (ProduktSkanningView):
+    #   1. Lokalisera mot kartan via /debug/lokalisera → (x_karta, yaw_karta)
+    #   2. Räkna ut T_arkit→karta lokalt och håll konstant under skanningen
+    #   3. Var 0.5s: ta frame, samla LiDAR-punkter (ARKit-world),
+    #      skicka bild + transform + intrinsics + image_dims +
+    #      T_arkit→karta + frame_punkter → här
+    #
+    # Backend kör A1 (Qwen-bbox + projektion av LiDAR-punkter), back-projekterar
+    # bbox-centrum till ARKit-world och multiplicerar med T_arkit→karta så att
+    # produkter sparas i kartans frame.
+
+    @app.post("/produkter/skanna_frame/")
+    async def skanna_frame_endpoint(
+        bild: UploadFile = File(...),
+        karta: str = Form(...),
+        transform: str = Form(...),               # JSON-array, 16 floats column-major
+        intrinsics: str = Form(...),              # JSON {fx,fy,cx,cy} portrait
+        image_dims: str = Form(...),              # JSON {image_width, image_height}
+        frame_punkter: str = Form("[]"),          # JSON-array [{x,y,z}, ...] ARKit-world
+        T_arkit_till_karta: str = Form("null"),   # JSON-array 16 floats eller "null"
+        frame_id: int = Form(0),
+    ):
+        from core.produkt_skanning import extrahera_produkter_a1, append_produkter
+
+        try:
+            bytes_ = await bild.read()
+            t = json.loads(transform)
+            intr = json.loads(intrinsics)
+            dims = json.loads(image_dims)
+            punkter = json.loads(frame_punkter)
+            t_ak_raw = json.loads(T_arkit_till_karta)
+            t_ak = t_ak_raw if isinstance(t_ak_raw, list) and len(t_ak_raw) == 16 else None
+        except (json.JSONDecodeError, ValueError) as e:
+            raise HTTPException(status_code=400, detail=f"Ogiltig JSON: {e}")
+
+        nya = extrahera_produkter_a1(
+            bild_bytes=bytes_,
+            frame_punkter=punkter,
+            transform=t,
+            intrinsics=intr,
+            image_dims=dims,
+            T_arkit_till_karta=t_ak,
+            frame_id=int(frame_id),
+        )
+        info = append_produkter(karta, nya)
+        return {
+            "hittad": len(nya) > 0,
+            "produkter": nya,
+            "antal_nya": len(nya),
+            "totalt": info.get("totalt", 0),
+        }
+
+
+    @app.get("/produkter/lista/{karta}")
+    async def lista_skannade_produkter(karta: str):
+        """Listar alla produkter som skannats in via Läge 2."""
+        from core.produkt_skanning import läs_produkter
+        return {"karta": karta, "produkter": läs_produkter(karta)}
+
+
+    @app.post("/produkter/lokalisera_för_skanning/")
+    async def lokalisera_för_skanning(
+        bild: UploadFile = File(...),
+        karta: str = Form(...),
+        arkit_transform: str = Form(...),   # JSON 16-floats column-major (ARKit world_from_camera)
+    ):
+        """
+        Kör VPS-lokalisering OCH returnerar T_arkit→karta så iOS slipper räkna
+        rotationsmatte själv. iOS kan sedan skicka samma transform med varje
+        produktskanningsframe.
+
+        Returns:
+          { hittad, pose, T_arkit_till_karta: [16], konfidens, inliers, ... }
+        """
+        import numpy as _np
+        from core.vps_3d import lokalisera as _lokalisera
+
+        try:
+            t_arkit_flat = json.loads(arkit_transform)
+            if not (isinstance(t_arkit_flat, list) and len(t_arkit_flat) == 16):
+                raise ValueError("arkit_transform måste vara 16 floats")
+        except (json.JSONDecodeError, ValueError) as e:
+            raise HTTPException(status_code=400, detail=f"Ogiltig arkit_transform: {e}")
+
+        bytes_ = await bild.read()
+        resultat = _lokalisera(bytes_, gång=karta)
+
+        if not resultat.get("hittad"):
+            return {"hittad": False, **resultat}
+
+        # Bygg T_karta_camera (4x4) från pose
+        x = float(resultat["x"]); y = float(resultat["y"]); z = float(resultat["z"])
+        roll = _np.deg2rad(float(resultat.get("roll", 0)))
+        pitch = _np.deg2rad(float(resultat.get("pitch", 0)))
+        yaw = _np.deg2rad(float(resultat.get("yaw", 0)))
+
+        # ZYX Euler (samma konvention som lokalisering.py extraherar)
+        Rx = _np.array([[1,0,0],[0,_np.cos(roll),-_np.sin(roll)],
+                        [0,_np.sin(roll),_np.cos(roll)]])
+        Ry = _np.array([[_np.cos(pitch),0,_np.sin(pitch)],[0,1,0],
+                        [-_np.sin(pitch),0,_np.cos(pitch)]])
+        Rz = _np.array([[_np.cos(yaw),-_np.sin(yaw),0],
+                        [_np.sin(yaw),_np.cos(yaw),0],[0,0,1]])
+        R_kc = Rz @ Ry @ Rx
+
+        T_karta_camera = _np.eye(4)
+        T_karta_camera[:3, :3] = R_kc
+        T_karta_camera[:3, 3] = [x, y, z]
+
+        # ARKit-transform (column-major flat → 4x4 row-major numpy)
+        T_arkit_camera = _np.array(t_arkit_flat, dtype=_np.float64).reshape(4, 4).T
+
+        try:
+            T_arkit_till_karta = T_karta_camera @ _np.linalg.inv(T_arkit_camera)
+        except _np.linalg.LinAlgError:
+            raise HTTPException(status_code=400, detail="Singulär ARKit-transform")
+
+        # Returnera column-major flat (samma format som iOS använder)
+        flat = T_arkit_till_karta.T.reshape(-1).tolist()
+
+        return {
+            "hittad": True,
+            "pose": {
+                "x": x, "y": y, "z": z,
+                "roll": float(resultat.get("roll", 0)),
+                "pitch": float(resultat.get("pitch", 0)),
+                "yaw": float(resultat.get("yaw", 0)),
+            },
+            "konfidens": resultat.get("konfidens", "okänd"),
+            "inliers": resultat.get("inliers", 0),
+            "T_arkit_till_karta": flat,
+            "metod": resultat.get("metod", ""),
+        }
+
+
+    # ─────────────────────────────────────────────
     # LIVE-LOKALISERING (för 3D-viewerns "min position"-dot)
     # ─────────────────────────────────────────────
 
