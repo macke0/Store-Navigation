@@ -13,6 +13,17 @@ from starlette.formparsers import MultiPartParser
 MultiPartParser.max_part_size = 1024 * 1024 * 500  # 500MB per form field
 
 
+# Tysta spammig polling i uvicorn-access-loggen.
+# Filtret refereras från log_config nedan så att det överlever
+# att uvicorn.run() konfigurerar om logging vid start.
+import logging as _logging
+class SkipPollingFilter(_logging.Filter):
+    _skip = ("/lokalisering-senaste", "/scan/bygg-status")
+    def filter(self, record):
+        msg = record.getMessage()
+        return not any(s in msg for s in self._skip)
+
+
 import asyncio
 from vps_endpoints import setup_vps_routes
 import json
@@ -20,8 +31,10 @@ import os
 import shutil
 import socket
 import time
+from pathlib import Path
 from typing import List
 from fastapi import FastAPI, UploadFile, File, Form, Request
+from fastapi.staticfiles import StaticFiles
 import re
 
 import uvicorn
@@ -94,6 +107,33 @@ class PixelKoordinat(BaseModel):
 
 app = FastAPI(title="Puls-AR API", version="3.2")
 
+
+# Tysta polling-spam vid serverstart i varje worker.
+# Vi patchar handler.emit direkt — addFilter() har visat sig opålitligt
+# i multi-worker-setup eftersom uvicorn ibland byter ut handlers.
+@app.on_event("startup")
+async def _registrera_skip_polling_filter():
+    logger = _logging.getLogger("uvicorn.access")
+    _SKIP = ("/lokalisering-senaste", "/scan/bygg-status")
+    patchade = 0
+    for handler in logger.handlers:
+        if getattr(handler, "_skip_polling_patched", False):
+            continue
+        _orig_emit = handler.emit
+        def _filtered_emit(record, _orig=_orig_emit):
+            try:
+                msg = record.getMessage()
+            except Exception:
+                msg = ""
+            if any(s in msg for s in _SKIP):
+                return
+            _orig(record)
+        handler.emit = _filtered_emit
+        handler._skip_polling_patched = True
+        patchade += 1
+    print(f"🔇 SkipPollingFilter aktivt ({patchade} handler patchad)")
+
+
 setup_sok_routes(app)
 app.include_router(vps_3d_router)
 setup_vps_routes(app)
@@ -103,6 +143,11 @@ app.include_router(viewer_router)
 app.include_router(viewer_3d_router)
 app.include_router(butik_router)
 app.include_router(edit_router)
+
+# Statiska filer (vendored Three.js m.m.) — serveras under /static/
+_static_dir = Path(__file__).resolve().parent / "static"
+_static_dir.mkdir(exist_ok=True)
+app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 
 
 
@@ -1194,4 +1239,5 @@ if __name__ == "__main__":
     port = hitta_ledig_port(8000)
     print(f"🚀 Puls-AR Server v3.2 startar på port {port}")
     print(f"   Dokumentation: http://localhost:{port}/docs")
+    # Filter sätts upp via @app.on_event("startup") — funkar oavsett startskript
     uvicorn.run(app, host="0.0.0.0", port=port)

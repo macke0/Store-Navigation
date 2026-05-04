@@ -23,10 +23,20 @@ if __name__ == "__main__":
 ╚══════════════════════════════════════╝
 """)
     
+    # Tysta polling-spam (lokalisering-senaste, bygg-status) i access-loggen.
+    # SkipPollingFilter definieras i server.py.
+    from copy import deepcopy
+    log_config = deepcopy(uvicorn.config.LOGGING_CONFIG)
+    log_config["filters"] = {
+        "skip_polling": {"()": "server.SkipPollingFilter"}
+    }
+    log_config["handlers"]["access"]["filters"] = ["skip_polling"]
+
     uvicorn.run(
         "server:app",
         host=HOST,
         port=PORT,
         workers=WORKERS,
         reload=RELOAD,
+        log_config=log_config,
     )

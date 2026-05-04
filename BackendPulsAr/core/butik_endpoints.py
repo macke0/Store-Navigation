@@ -122,6 +122,8 @@ async def ladda_upp_batch(
     punkter_3d: str = Form("[]"),
     frames: List[UploadFile] = File(default=[]),
     mesh: List[UploadFile] = File(default=[]),
+    mesh_glb: Optional[UploadFile] = File(None),
+    mesh_status: Optional[str] = Form(None),
     karta_id: str = Form(None),
 ):
     """
@@ -162,13 +164,30 @@ async def ladda_upp_batch(
         for mesh_fil in mesh:
             content = await mesh_fil.read()
             mesh_data.append((mesh_fil.filename, content))
-        
+
         butik.lägg_till_mesh(
             session_id=session.session_id,
             mesh_filer=mesh_data,
         )
         print(f"   📦 Sparade {len(mesh_data)} mesh-filer för session {session.session_id}")
-    
+
+    # Diagnostik (debugg-version, loggas alltid på sista batchen)
+    if is_last.lower() == "true":
+        print(f"   🔬 [DEBUG] is_last=true · mesh_status={mesh_status!r} · mesh_glb={'YES' if mesh_glb else 'NO'} · mesh_bin_count={len(mesh)}")
+
+    # Diagnostik från iOS — visar varför mesh.glb skapades eller inte
+    if mesh_status:
+        print(f"   🔬 mesh_status från iOS: {mesh_status}")
+
+    # Spara färdig mesh.glb från iOS (MeshExporter) direkt — /viewer/mesh läser den
+    if mesh_glb is not None:
+        glb_bytes = await mesh_glb.read()
+        glb_path = session.session_dir / "mesh.glb"
+        glb_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(glb_path, "wb") as f:
+            f.write(glb_bytes)
+        print(f"   📦 Sparade mesh.glb ({len(glb_bytes) // 1024} KB) → {glb_path}")
+
     # Spara karta_id om det skickas (för multi-session)
     if karta_id:
         butik.sätt_karta_id(session.session_id, karta_id)

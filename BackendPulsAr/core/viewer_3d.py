@@ -37,6 +37,13 @@ body{background:#0a0a0a;color:#e0e0e0;overflow:hidden;height:100vh;
 .mode-btn:hover{border-color:#e31e24}
 .stat{font-size:11px;color:#444}
 
+/* Höjd-filter */
+.h-filter{display:flex;align-items:center;gap:6px;font-size:11px;color:#777;
+  padding:3px 10px;border:1px solid #222;border-radius:6px;background:#0d0d0d}
+.h-filter label{font-weight:600;color:#888}
+.h-filter input[type=range]{width:90px;accent-color:#e31e24;cursor:pointer}
+.h-filter .h-val{min-width:36px;text-align:right;font-variant-numeric:tabular-nums;color:#aaa}
+
 .main{display:flex;flex:1;overflow:hidden}
 
 /* 3D canvas */
@@ -104,6 +111,16 @@ body{background:#0a0a0a;color:#e0e0e0;overflow:hidden;height:100vh;
     <span class="topbar-title">Puls-AR 3D <span id="gångLabel" style="color:#888;font-weight:400"></span></span>
     <button class="mode-btn active" id="mOrbit" onclick="setMode('orbit')">Orbit</button>
     <button class="mode-btn" id="mWalk" onclick="setMode('walk')">Walk</button>
+    <button class="mode-btn" id="mTop" onclick="setMode('top')">Topp</button>
+    <div class="h-filter" title="Klipp bort tak / golv. Värdena är meter över golv-percentilen.">
+      <label>Höjd</label>
+      <input type="range" id="hMaxSlider" min="0.3" max="4.0" step="0.1" value="2.2">
+      <span class="h-val" id="hMaxVal">2.2m</span>
+    </div>
+    <button class="mode-btn" id="mTakBort" onclick="toggleTak()" title="Visa/dölj tak">Tak av</button>
+    <button class="mode-btn active" id="mMesh" onclick="setRender('mesh')" title="Visa LiDAR-mesh">Mesh</button>
+    <button class="mode-btn" id="mPunkter" onclick="setRender('punkter')" title="Visa punktmoln">Punkter</button>
+    <button class="mode-btn" id="mLive" onclick="toggleLivePos()" title="Visa live-position från iPhone (pollar var sekund)">Live</button>
     <span class="stat" id="statTxt"></span>
     <span class="stat" id="livePosTxt" style="color:#00aaff"></span>
   </div>
@@ -129,25 +146,75 @@ body{background:#0a0a0a;color:#e0e0e0;overflow:hidden;height:100vh;
 </div>
 <div id="tooltip"><h4 id="ttN"></h4><div class="meta" id="ttM"></div><div class="konf-bar"><div class="konf-fill" id="ttK"></div></div></div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// Three.js core + GLTFLoader. Försök lokal vendor först, fallback till CDN.
+(function loadThree(){
+  function load(src, ok, fail){
+    const s=document.createElement('script');
+    s.src=src; s.onload=ok; s.onerror=fail;
+    document.head.appendChild(s);
+  }
+  function afterCore(){
+    // GLTFLoader (för mesh.glb). Bara CDN — vi behöver inte vendor:a.
+    const gltfUrls = [
+      '/static/GLTFLoader.js',
+      'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js',
+      'https://unpkg.com/three@0.128.0/examples/js/loaders/GLTFLoader.js'
+    ];
+    let i=0;
+    function tryNext(){
+      if (i>=gltfUrls.length){
+        console.error('Kunde inte ladda GLTFLoader — mesh-vy kommer inte funka');
+        window._threeReady && window._threeReady();
+        return;
+      }
+      load(gltfUrls[i++], () => window._threeReady && window._threeReady(), tryNext);
+    }
+    tryNext();
+  }
+  load('/static/three.min.js', afterCore,
+    () => load('https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js',
+              afterCore,
+              () => console.error('Kunde inte ladda Three.js')));
+})();
+window._threeReady = function(){
+  if (window._threeStarted) return;
+  if (typeof THREE === 'undefined') { console.error('THREE saknas vid _threeReady'); return; }
+  window._threeStarted = true;
+  init();
+};
+</script>
 <script>
 const API = window.location.origin;
 // Vilken gång ska visas? ?gång=mjölk_gång — fallback hela_butiken
 const gång = new URLSearchParams(window.location.search).get('gång') || 'hela_butiken';
 document.getElementById('gångLabel').textContent = '· ' + gång;
 
-let scene, cam, renderer, raycaster = new THREE.Raycaster(), mouse = new THREE.Vector2();
+let scene, cam, renderer, raycaster, mouse;
 let positioner=[], produkter=[], frames=[];
 let pathDots=[], prodMeshes=[];
 let mode='orbit', walkIdx=0, selectedFrameIdx=-1;
 let mmBounds={};
+
+// Punktmoln-state — så vi kan ta bort/lägga till vid filterändring
+let pointCloudMesh = null;
+let pointCloudMeta = {y_floor:null, y_ceil:null, h_min:null, h_max:null};
+let takBortkopplat = true;       // True = klipp tak
+let userHMax = 2.2;              // användarens slider-värde (meter över golvet)
+let pointCloudFetchToken = 0;    // för att avbryta gammal fetch
+
+// Mesh-state (LiDAR mesh.glb)
+let meshRoot = null;             // THREE.Group containing loaded mesh
+let meshMaterials = [];          // alla material som ska ha clipping
+let meshClippingPlane = null;    // höjd-clipping
+let renderMode = 'mesh';         // 'mesh' | 'punkter' | 'båda'
 
 // Live-position state (rapporterad av iOS-app eller web-test)
 let livePosMesh=null, livePosArrow=null, livePosLastT=0;
 
 // Orbit state
 let orb = {r:12, phi:Math.PI/3.5, theta:0};
-let tgt = new THREE.Vector3();
+let tgt = null; // skapas i init() när THREE finns
 let drag=false, rDrag=false, prev={x:0,y:0}, clickT=0, clickP={x:0,y:0};
 
 // Highlighted
@@ -155,6 +222,10 @@ let highlightedDot = null;
 
 // ── INIT ──
 async function init(){
+  // Skapa Three-objekt nu när THREE finns
+  raycaster = new THREE.Raycaster();
+  mouse = new THREE.Vector2();
+  tgt = new THREE.Vector3();
   // Scene
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x080808);
@@ -163,6 +234,7 @@ async function init(){
   cam = new THREE.PerspectiveCamera(55, 1, 0.05, 150);
   renderer = new THREE.WebGLRenderer({antialias:true, alpha:false});
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.localClippingEnabled = true;
   renderer.shadowMap.enabled = false;
   document.getElementById('canvasWrap').prepend(renderer.domElement);
   onResize();
@@ -210,7 +282,13 @@ async function init(){
 
   buildPath();
   buildProducts();
-  await buildPointCloud();
+  // Default: visa LiDAR-mesh (snyggast). Punktmoln laddas lazily om man togglar.
+  if (renderMode === 'mesh' || renderMode === 'båda'){
+    await buildMesh();
+  }
+  if (renderMode === 'punkter' || renderMode === 'båda'){
+    await buildPointCloud();
+  }
   centerCam();
   drawMinimap();
 
@@ -221,9 +299,24 @@ async function init(){
   setupEvents();
   animate();
 
-  // Starta poll-loop för live-position (1 Hz)
-  pollLivePos();
-  setInterval(pollLivePos, 1000);
+  // Live-position pollas BARA när användaren slår på det via knappen
+  // i topbar — undviker spam-loggar när ingen iPhone rapporterar in.
+}
+
+let livePosTimer = null;
+function toggleLivePos(){
+  const btn = document.getElementById('mLive');
+  if (livePosTimer){
+    clearInterval(livePosTimer); livePosTimer = null;
+    if(livePosMesh){scene.remove(livePosMesh); livePosMesh=null}
+    if(livePosArrow){scene.remove(livePosArrow); livePosArrow=null}
+    document.getElementById('livePosTxt').textContent='';
+    btn.classList.remove('active');
+  } else {
+    pollLivePos();
+    livePosTimer = setInterval(pollLivePos, 1000);
+    btn.classList.add('active');
+  }
 }
 
 // ── LIVE POSITION ──
@@ -373,34 +466,234 @@ function makeLabel(text,color){
   return s;
 }
 
+// ── MESH (LiDAR mesh.glb) ──
+async function buildMesh(){
+  if (typeof THREE.GLTFLoader === 'undefined'){
+    console.warn('GLTFLoader saknas — kan inte ladda mesh');
+    return;
+  }
+  removeMesh();
+  return new Promise((resolve) => {
+    const loader = new THREE.GLTFLoader();
+    loader.load(`${API}/viewer/mesh?karta=${encodeURIComponent(gång)}`,
+      (gltf) => {
+        meshRoot = gltf.scene || gltf.scenes[0];
+        meshMaterials = [];
+
+        // Beräkna bounding box för att få y_floor/y_ceil
+        const box = new THREE.Box3().setFromObject(meshRoot);
+        if (box.isEmpty()){
+          console.warn('Mesh bounding box är tom');
+          resolve(); return;
+        }
+        // Spara meta — överskrivs INTE om pointcloud redan satte dem
+        if (pointCloudMeta.y_floor == null) pointCloudMeta.y_floor = box.min.y;
+        if (pointCloudMeta.y_ceil == null) pointCloudMeta.y_ceil = box.max.y;
+
+        // Clipping plane (kapas vid h_max). Plan-normalen pekar nedåt så
+        // allt över ytan klipps bort. constant = h_max.
+        meshClippingPlane = new THREE.Plane(new THREE.Vector3(0,-1,0), 0);
+        updateClippingPlane();
+
+        // Sätt upp material med clipping + bra defaults
+        meshRoot.traverse((obj) => {
+          if (obj.isMesh){
+            // Original-materialen kan vara MeshStandardMaterial från RoomPlan.
+            // Kopiera och slå på clipping.
+            const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+            const newMats = mats.map(m => {
+              const nm = m.clone();
+              nm.clippingPlanes = [meshClippingPlane];
+              nm.side = THREE.DoubleSide;
+              // Om materialet saknar färg/textur, ge den en ljus default
+              if (!nm.map && (!nm.color || nm.color.getHex() === 0xffffff)){
+                nm.color = new THREE.Color(0xa8b8c0);
+              }
+              if (nm.metalness !== undefined) nm.metalness = 0.05;
+              if (nm.roughness !== undefined) nm.roughness = 0.85;
+              meshMaterials.push(nm);
+              return nm;
+            });
+            obj.material = Array.isArray(obj.material) ? newMats : newMats[0];
+            obj.castShadow = false;
+            obj.receiveShadow = false;
+          }
+        });
+
+        scene.add(meshRoot);
+        applyRenderMode();
+        console.log('Mesh laddad:', meshMaterials.length, 'materials, bbox y=',
+                    box.min.y.toFixed(2),'→',box.max.y.toFixed(2));
+        resolve();
+      },
+      undefined,
+      (err) => { console.error('GLTFLoader fel:', err); resolve(); }
+    );
+  });
+}
+
+function removeMesh(){
+  if(!meshRoot) return;
+  scene.remove(meshRoot);
+  meshRoot.traverse((obj) => {
+    if (obj.isMesh){
+      if (obj.geometry) obj.geometry.dispose();
+      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+      mats.forEach(m => m && m.dispose && m.dispose());
+    }
+  });
+  meshRoot = null;
+  meshMaterials = [];
+  meshClippingPlane = null;
+}
+
+function updateClippingPlane(){
+  if (!meshClippingPlane) return;
+  if (takBortkopplat && pointCloudMeta.y_floor != null){
+    const h = pointCloudMeta.y_floor + userHMax;
+    // Plane.constant betyder: planet är y = constant när normalen är (0,-1,0)
+    // Punkter där dot(n, p) + constant > 0 hålls. n=(0,-1,0) → -p.y + c > 0 → p.y < c
+    // Så vi sätter constant = h.
+    meshClippingPlane.constant = h;
+  } else {
+    // Inaktivera clipping genom att sätta constant väldigt högt
+    meshClippingPlane.constant = 1e6;
+  }
+}
+
+function setRender(m){
+  renderMode = m;
+  document.getElementById('mMesh').classList.toggle('active', m==='mesh' || m==='båda');
+  document.getElementById('mPunkter').classList.toggle('active', m==='punkter' || m==='båda');
+  applyRenderMode();
+}
+
+function applyRenderMode(){
+  const showMesh = (renderMode === 'mesh' || renderMode === 'båda');
+  const showPts = (renderMode === 'punkter' || renderMode === 'båda');
+  if (meshRoot) meshRoot.visible = showMesh;
+  if (pointCloudMesh) pointCloudMesh.visible = showPts;
+  // Lazy-load om inte laddat ännu
+  if (showPts && !pointCloudMesh) buildPointCloud();
+  if (showMesh && !meshRoot) buildMesh();
+}
+
 // ── POINT CLOUD ──
+function pointCloudURL(){
+  // Bygg query: alltid auto_floor=true. Ceiling kan klippas av med h_max om tak ska bort.
+  const params = new URLSearchParams({
+    karta: gång,
+    max_points: '60000',
+    auto_floor: 'true',
+  });
+  if (takBortkopplat){
+    // h_max i absoluta y: floor + userHMax
+    if (pointCloudMeta.y_floor != null){
+      params.set('höjd_max', String(pointCloudMeta.y_floor + userHMax));
+    }
+    // Backenden klipper tak default — vi behöver inte sätta ceiling_offset
+  } else {
+    // Visa allt: stäng av auto för h_max genom att skicka stort tal
+    params.set('ceiling_offset', '-2.0');
+  }
+  return `${API}/viewer/pointcloud?` + params.toString();
+}
+
 async function buildPointCloud(){
+  const myToken = ++pointCloudFetchToken;
   try{
-    const r=await fetch(`${API}/viewer/pointcloud?max_points=60000`);
-    const d=await r.json();
-    if(!d.punkter||!d.punkter.length)return;
+    const r = await fetch(pointCloudURL());
+    const d = await r.json();
+    if (myToken !== pointCloudFetchToken) return; // newer fetch i flygande
+    if(!d.punkter||!d.punkter.length){
+      removePointCloud();
+      pointCloudMeta = {y_floor:d.y_floor, y_ceil:d.y_ceil, h_min:d.h_min, h_max:d.h_max};
+      return;
+    }
+    pointCloudMeta = {y_floor:d.y_floor, y_ceil:d.y_ceil, h_min:d.h_min, h_max:d.h_max};
     const pts=d.punkter;
     const geo=new THREE.BufferGeometry();
     const positions=new Float32Array(pts.length*3);
     const colors=new Float32Array(pts.length*3);
-    let minY=Infinity,maxY=-Infinity;
-    for(const p of pts){minY=Math.min(minY,p[1]);maxY=Math.max(maxY,p[1])}
-    const rangeY=maxY-minY||1;
+    // Använd faktiska floor/ceil från servern för stabil färggradient
+    const minY = (d.y_floor!=null)?d.y_floor : Math.min(...pts.map(p=>p[1]));
+    const maxY = (d.h_max!=null)?d.h_max : (d.y_ceil!=null?d.y_ceil:Math.max(...pts.map(p=>p[1])));
+    const rangeY=Math.max(0.5, maxY-minY);
     for(let i=0;i<pts.length;i++){
       positions[i*3]=pts[i][0];
       positions[i*3+1]=pts[i][1];
       positions[i*3+2]=pts[i][2];
-      const t=(pts[i][1]-minY)/rangeY;
-      if(t<0.3){colors[i*3]=0.05+t*0.3;colors[i*3+1]=0.08+t*0.4;colors[i*3+2]=0.15+t*0.5}
-      else if(t<0.7){const s=(t-0.3)/0.4;colors[i*3]=0.1+s*0.2;colors[i*3+1]=0.2+s*0.4;colors[i*3+2]=0.3+s*0.3}
-      else{const s=(t-0.7)/0.3;colors[i*3]=0.3+s*0.5;colors[i*3+1]=0.6+s*0.3;colors[i*3+2]=0.6+s*0.2}
+      // Färggradient: ljust grågrönt på golv-nivå → gult/orange högre upp
+      // Vi lättar mörkret jämfört med tidigare för att efterlikna 3dviewer.net
+      let t=(pts[i][1]-minY)/rangeY;
+      if (t<0) t=0; if (t>1) t=1;
+      if(t<0.35){
+        // golvet: dimmig blå-grön
+        const s=t/0.35;
+        colors[i*3]=0.30+s*0.10;
+        colors[i*3+1]=0.45+s*0.20;
+        colors[i*3+2]=0.55+s*0.10;
+      } else if(t<0.75){
+        // mellanhöjd: ljusgrön/teal
+        const s=(t-0.35)/0.40;
+        colors[i*3]=0.40+s*0.30;
+        colors[i*3+1]=0.65+s*0.20;
+        colors[i*3+2]=0.65-s*0.20;
+      } else {
+        // toppen: varm orange
+        const s=(t-0.75)/0.25;
+        colors[i*3]=0.70+s*0.25;
+        colors[i*3+1]=0.85-s*0.20;
+        colors[i*3+2]=0.45-s*0.30;
+      }
     }
     geo.setAttribute('position',new THREE.BufferAttribute(positions,3));
     geo.setAttribute('color',new THREE.BufferAttribute(colors,3));
-    const mat=new THREE.PointsMaterial({size:0.02,vertexColors:true,transparent:true,opacity:0.6,sizeAttenuation:true,depthWrite:false});
-    scene.add(new THREE.Points(geo,mat));
-    console.log('Punktmoln:',pts.length,'punkter');
+    // PointsMaterial: större punkter, hög opacitet, ingen size-attenuation = jämn dot-storlek
+    const mat=new THREE.PointsMaterial({
+      size: (mode==='top') ? 2.4 : 2.0,
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.92,
+      sizeAttenuation: false,   // konstant storlek i px → ser fyllig ut
+      depthWrite: true,
+    });
+    removePointCloud();
+    pointCloudMesh = new THREE.Points(geo, mat);
+    scene.add(pointCloudMesh);
+    console.log('Punktmoln:', pts.length, 'punkter, y_floor=',d.y_floor,'h_max=',d.h_max);
   }catch(e){console.error('Pointcloud:',e)}
+}
+
+function removePointCloud(){
+  if(!pointCloudMesh) return;
+  scene.remove(pointCloudMesh);
+  if (pointCloudMesh.geometry) pointCloudMesh.geometry.dispose();
+  if (pointCloudMesh.material) pointCloudMesh.material.dispose();
+  pointCloudMesh = null;
+}
+
+// Debounced refetch när slider ändras
+let _hMaxDebounceTimer = null;
+function onHMaxChange(val){
+  userHMax = parseFloat(val);
+  document.getElementById('hMaxVal').textContent = userHMax.toFixed(1)+'m';
+  // Mesh: clipping plane uppdateras direkt (no fetch)
+  updateClippingPlane();
+  // Punktmoln: debounced refetch
+  if(_hMaxDebounceTimer) clearTimeout(_hMaxDebounceTimer);
+  _hMaxDebounceTimer = setTimeout(()=>{
+    if (renderMode === 'punkter' || renderMode === 'båda') buildPointCloud();
+  }, 250);
+}
+
+function toggleTak(){
+  takBortkopplat = !takBortkopplat;
+  const btn = document.getElementById('mTakBort');
+  btn.textContent = takBortkopplat ? 'Tak av' : 'Tak på';
+  btn.classList.toggle('active', !takBortkopplat);
+  updateClippingPlane();
+  if (renderMode === 'punkter' || renderMode === 'båda') buildPointCloud();
 }
 
 // ── CAMERA ──
@@ -475,6 +768,14 @@ function setupEvents(){
       if(e.key==='f')centerCam();
     }
   });
+
+  // Höjd-slider
+  const hMaxEl = document.getElementById('hMaxSlider');
+  if (hMaxEl){
+    hMaxEl.addEventListener('input', e => onHMaxChange(e.target.value));
+    document.getElementById('hMaxVal').textContent = parseFloat(hMaxEl.value).toFixed(1)+'m';
+    userHMax = parseFloat(hMaxEl.value);
+  }
 
   // Minimap click
   document.getElementById('minimapCanvas').addEventListener('click',function(e){
@@ -608,11 +909,12 @@ function projectOnFrame(posIdx){
   }
 }
 
-// ── WALK MODE ──
+// ── WALK / TOP / ORBIT MODE ──
 function setMode(m){
   mode=m;
   document.getElementById('mOrbit').classList.toggle('active',m==='orbit');
   document.getElementById('mWalk').classList.toggle('active',m==='walk');
+  const mTop=document.getElementById('mTop'); if(mTop) mTop.classList.toggle('active',m==='top');
   document.getElementById('walkHud').style.display=m==='walk'?'block':'none';
   if(m==='walk'){
     // Start at nearest pos to current target
@@ -621,7 +923,33 @@ function setMode(m){
       const d=Math.sqrt((tgt.x-(p.x||0))**2+(tgt.z-(p.z||0))**2);
       if(d<bd){bd=d;best=i}}
     goWalk(best);
-  }else{
+  } else if (m==='top'){
+    // Topp-vy: kameran rakt ovanifrån, ser ner i butiken
+    // Beräkna bounds
+    let minX=Infinity,maxX=-Infinity,minZ=Infinity,maxZ=-Infinity;
+    for(const p of positioner){
+      minX=Math.min(minX,p.x||0); maxX=Math.max(maxX,p.x||0);
+      minZ=Math.min(minZ,p.z||0); maxZ=Math.max(maxZ,p.z||0);
+    }
+    if(!isFinite(minX)){minX=-5;maxX=5;minZ=-5;maxZ=5;}
+    const cx=(minX+maxX)/2, cz=(minZ+maxZ)/2;
+    const radius=Math.max(maxX-minX, maxZ-minZ)*0.7 + 4;
+    tgt.set(cx,0,cz);
+    cam.position.set(cx, radius, cz+0.001); // litet z-offset så lookAt funkar
+    cam.lookAt(tgt);
+    // Justera orbit-state så vidare drag fungerar
+    orb.r = radius; orb.phi = 0.001; orb.theta = Math.PI/2;
+    // Större punkter i topp-vyn
+    if(pointCloudMesh && pointCloudMesh.material){
+      pointCloudMesh.material.size = 2.6;
+      pointCloudMesh.material.needsUpdate = true;
+    }
+  } else {
+    // Orbit
+    if(pointCloudMesh && pointCloudMesh.material){
+      pointCloudMesh.material.size = 2.0;
+      pointCloudMesh.material.needsUpdate = true;
+    }
     centerCam();
   }
 }
@@ -709,7 +1037,12 @@ function onResize(){
   renderer.setSize(w,h);
 }
 
-init();
+// init() startas av _threeReady() i loader-scriptet ovan när Three.js har laddats.
+// Om THREE råkar finnas redan (cachad), starta nu.
+if (typeof THREE !== 'undefined' && !window._threeStarted){
+  window._threeStarted = true;
+  init();
+}
 </script>
 </body>
 </html>
