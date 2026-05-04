@@ -483,43 +483,148 @@ laddaSkanningar();
 </html>
 """
 
-@router.get("/viewer/pointcloud")
-async def viewer_pointcloud(max_points: int = 50000):
-    """Returnera 3D-punktmoln från alla sessioner."""
-    import random
-    punkter = []
+@router.get("/viewer/mesh")
+async def viewer_mesh(karta: str = "hela_butiken", session: str | None = None):
+    """Returnera senaste mesh.glb (eller en specifik session).
+
+    - karta: just nu informativ; vi söker i alla sessioner.
+      Senare kan vi koppla karta → sessioner via metadata.
+    - session: explicit session-namn (t.ex. session_1777545535).
+      Om null tas senaste mesh.glb (efter mtime).
+    """
     sessioner_dir = BUTIK_DIR / "sessioner"
+    if not sessioner_dir.exists():
+        return {"fel": "Inga sessioner finns"}
+
+    if session:
+        mp = sessioner_dir / session / "mesh.glb"
+        if not mp.exists():
+            return {"fel": f"mesh.glb saknas för {session}"}
+        return FileResponse(str(mp), media_type="model/gltf-binary",
+                            filename=f"{session}.glb")
+
+    # Hitta senaste mesh.glb
+    candidates: list[tuple[float, Path]] = []
+    for sd in sessioner_dir.iterdir():
+        if not sd.is_dir():
+            continue
+        mp = sd / "mesh.glb"
+        if mp.exists():
+            candidates.append((mp.stat().st_mtime, mp))
+    if not candidates:
+        return {"fel": "Ingen mesh.glb hittad i någon session"}
+    candidates.sort(reverse=True)
+    latest = candidates[0][1]
+    return FileResponse(str(latest), media_type="model/gltf-binary",
+                        filename=f"{latest.parent.name}.glb")
+
+
+@router.get("/viewer/mesh_list")
+async def viewer_mesh_list():
+    """Lista alla sessioner som har mesh.glb."""
+    sessioner_dir = BUTIK_DIR / "sessioner"
+    out = []
     if sessioner_dir.exists():
         for sd in sorted(sessioner_dir.iterdir()):
-            pp = sd / "punkter_3d.json"
-            if pp.exists():
-                with open(pp) as f:
-                    pts = json.load(f)
-                for p in pts:
-                    punkter.append([
-                        round(p.get("x", 0), 3),
-                        round(p.get("y", 0), 3),
-                        round(p.get("z", 0), 3)
-                    ])
-    # Sampla om för många
-    if len(punkter) > max_points:
-        punkter = random.sample(punkter, max_points)
-    return {"antal": len(punkter), "punkter": punkter}
+            mp = sd / "mesh.glb"
+            if mp.exists():
+                out.append({
+                    "session": sd.name,
+                    "size_mb": round(mp.stat().st_size / 1024 / 1024, 2),
+                    "mtime": mp.stat().st_mtime,
+                })
+    return {"meshes": out}
 
 
 @router.get("/viewer/pointcloud")
-async def viewer_pointcloud(max_points: int = 50000):
+async def viewer_pointcloud(
+    karta: str = "hela_butiken",
+    max_points: int = 60000,
+    höjd_min: float | None = None,
+    höjd_max: float | None = None,
+    auto_floor: bool = True,
+    floor_offset: float = 0.20,
+    ceiling_offset: float = 0.30,
+):
+    """Returnera 3D-punktmoln för en karta med valfri höjd-filtrering.
+
+    - karta: kartans namn (default: hela_butiken). Används för att hitta
+      `data/kartor/<karta>/all_points_3d.npy` om den finns.
+      Annars faller vi tillbaka till sessions-data i butik_modell/sessioner.
+    - höjd_min / höjd_max: absoluta y-värden i meter. Punkter utanför
+      intervallet filtreras bort.
+    - auto_floor: om True och höjd_min saknas — sätt höjd_min = 5:e percentil + floor_offset.
+      Om höjd_max saknas — sätt höjd_max = 95:e percentil - ceiling_offset.
+      Detta tar bort tak och rymmer ner till strax ovanför golvet.
+    - floor_offset / ceiling_offset: hur långt över/under percentilerna vi klipper.
+    """
     import random
-    punkter = []
-    sessioner_dir = BUTIK_DIR / "sessioner"
-    if sessioner_dir.exists():
-        for sd in sorted(sessioner_dir.iterdir()):
-            pp = sd / "punkter_3d.json"
-            if pp.exists():
+    import numpy as np
+
+    pts: list[tuple[float, float, float]] = []
+
+    # 1) Försök läsa multi-session karta först (snabbare + redan transformerad)
+    karta_dir = KARTOR_DIR / karta.replace(" ", "_")
+    npy_path = karta_dir / "all_points_3d.npy"
+    if npy_path.exists():
+        try:
+            arr = np.load(str(npy_path))
+            if arr.ndim == 2 and arr.shape[1] >= 3:
+                pts = [tuple(row[:3]) for row in arr]
+        except Exception as e:
+            print(f"[/viewer/pointcloud] kunde inte läsa {npy_path}: {e}")
+
+    # 2) Fallback: läs alla sessioner
+    if not pts:
+        sessioner_dir = BUTIK_DIR / "sessioner"
+        if sessioner_dir.exists():
+            for sd in sorted(sessioner_dir.iterdir()):
+                pp = sd / "punkter_3d.json"
+                if not pp.exists():
+                    continue
                 with open(pp) as f:
-                    pts = json.load(f)
-                for p in pts:
-                    punkter.append([round(p.get("x",0),3),round(p.get("y",0),3),round(p.get("z",0),3)])
-    if len(punkter) > max_points:
-        punkter = random.sample(punkter, max_points)
-    return {"antal": len(punkter), "punkter": punkter}
+                    raw = json.load(f)
+                for p in raw:
+                    pts.append((p.get("x", 0), p.get("y", 0), p.get("z", 0)))
+
+    if not pts:
+        return {"antal": 0, "punkter": [], "h_min": None, "h_max": None,
+                "y_floor": None, "y_ceil": None}
+
+    arr = np.asarray(pts, dtype=float)
+    ys = arr[:, 1]
+    y_floor = float(np.percentile(ys, 5))
+    y_ceil = float(np.percentile(ys, 95))
+
+    h_min = höjd_min
+    h_max = höjd_max
+    if auto_floor:
+        if h_min is None:
+            h_min = y_floor + floor_offset
+        if h_max is None:
+            h_max = y_ceil - ceiling_offset
+
+    if h_min is not None or h_max is not None:
+        mask = np.ones(len(arr), dtype=bool)
+        if h_min is not None:
+            mask &= ys >= h_min
+        if h_max is not None:
+            mask &= ys <= h_max
+        arr = arr[mask]
+
+    # Sampla ner om för många
+    if len(arr) > max_points and max_points > 0:
+        idx = np.random.choice(len(arr), max_points, replace=False)
+        arr = arr[idx]
+
+    punkter = [[round(float(x), 3), round(float(y), 3), round(float(z), 3)]
+               for x, y, z in arr]
+
+    return {
+        "antal": len(punkter),
+        "punkter": punkter,
+        "h_min": h_min,
+        "h_max": h_max,
+        "y_floor": y_floor,
+        "y_ceil": y_ceil,
+    }
