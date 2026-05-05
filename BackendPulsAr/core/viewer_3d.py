@@ -180,6 +180,9 @@ body{background:#0a0a0a;color:#e0e0e0;overflow:hidden;height:100vh;
 window._threeReady = function(){
   if (window._threeStarted) return;
   if (typeof THREE === 'undefined') { console.error('THREE saknas vid _threeReady'); return; }
+  // init() definieras i nästa <script>-block — om vi kommer hit innan det
+  // hunnit parsas (snabb cache), pollar vi tills init finns.
+  if (typeof init !== 'function') { setTimeout(window._threeReady, 10); return; }
   window._threeStarted = true;
   init();
 };
