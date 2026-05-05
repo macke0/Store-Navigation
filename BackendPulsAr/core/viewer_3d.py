@@ -114,7 +114,7 @@ body{background:#0a0a0a;color:#e0e0e0;overflow:hidden;height:100vh;
     <button class="mode-btn" id="mTop" onclick="setMode('top')">Topp</button>
     <div class="h-filter" title="Klipp bort tak / golv. Värdena är meter över golv-percentilen.">
       <label>Höjd</label>
-      <input type="range" id="hMaxSlider" min="0.3" max="4.0" step="0.1" value="2.2">
+      <input type="range" id="hMaxSlider" min="0.3" max="4.0" step="0.1" value="4.0">
       <span class="h-val" id="hMaxVal">2.2m</span>
     </div>
     <button class="mode-btn" id="mTakBort" onclick="toggleTak()" title="Visa/dölj tak">Tak av</button>
@@ -200,7 +200,7 @@ let mmBounds={};
 let pointCloudMesh = null;
 let pointCloudMeta = {y_floor:null, y_ceil:null, h_min:null, h_max:null};
 let takBortkopplat = true;       // True = klipp tak
-let userHMax = 2.2;              // användarens slider-värde (meter över golvet)
+let userHMax = 4.0;              // användarens slider-värde (meter över golvet)
 let pointCloudFetchToken = 0;    // för att avbryta gammal fetch
 
 // Mesh-state (LiDAR mesh.glb)
@@ -246,16 +246,17 @@ async function init(){
   const hl = new THREE.HemisphereLight(0x222244, 0x111111, 0.3);
   scene.add(hl);
 
-  // Floor
+  // Floor (programmatiskt fake-golv) — gömmer mesh-golvet om ARKit Y=0 ≠ riktigt golv.
+  // Sparas som global så vi kan dölja det när mesh laddas.
   const floorGeo = new THREE.PlaneGeometry(80,80);
   const floorMat = new THREE.MeshStandardMaterial({color:0x0c0c0c, roughness:0.9, metalness:0.1});
-  const floor = new THREE.Mesh(floorGeo, floorMat);
-  floor.rotation.x = -Math.PI/2; floor.position.y = -0.01;
-  scene.add(floor);
+  window._fakeFloor = new THREE.Mesh(floorGeo, floorMat);
+  window._fakeFloor.rotation.x = -Math.PI/2; window._fakeFloor.position.y = -0.01;
+  scene.add(window._fakeFloor);
 
-  // Grid
-  const grid = new THREE.GridHelper(80, 80, 0x161616, 0x101010);
-  scene.add(grid);
+  // Grid på y=0 — överlagrar mesh på golvnivå. Sparas så vi kan dölja det.
+  window._fakeGrid = new THREE.GridHelper(80, 80, 0x161616, 0x101010);
+  scene.add(window._fakeGrid);
 
   // Data: positioner + frames + batch-produkter från viewer/data
   try{
@@ -522,8 +523,14 @@ async function buildMesh(){
 
         scene.add(meshRoot);
         applyRenderMode();
-        console.log('Mesh laddad:', meshMaterials.length, 'materials, bbox y=',
-                    box.min.y.toFixed(2),'→',box.max.y.toFixed(2));
+        // Dölj fake-golv och grid när vi har riktig mesh — annars kan de
+        // täcka mesh-golvet (om ARKit Y=0 ≠ verkligt golv) eller störa visuellt.
+        if (window._fakeFloor) window._fakeFloor.visible = false;
+        if (window._fakeGrid) window._fakeGrid.visible = false;
+        console.log('Mesh laddad:', meshMaterials.length, 'materials, bbox=',
+                    'y:', box.min.y.toFixed(2),'→',box.max.y.toFixed(2),
+                    '· x:', box.min.x.toFixed(2),'→',box.max.x.toFixed(2),
+                    '· z:', box.min.z.toFixed(2),'→',box.max.z.toFixed(2));
         resolve();
       },
       undefined,
