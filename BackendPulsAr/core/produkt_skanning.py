@@ -86,8 +86,10 @@ def _projicera_punkter_till_portrait(
     fx_L: float, fy_L: float, cx_L: float, cy_L: float,
     H_L: float,
 ) -> List[Tuple[float, float, float]]:
-    """World (ARKit) → portrait pixel (u_P, v_P, zc).
-    Punkter bakom kameran (zc <= 0.1) filtreras bort."""
+    """World (ARKit) → portrait pixel (u_P, v_P, djup_framåt).
+    ARKit camera-frame: +X right, +Y up, +Z BAKÅT. Punkter framför kameran
+    har alltså negativt Z. Vi flippar till CV-konvention (Z framåt, Y ned)
+    innan pinhole-formeln. Punkter bakom kameran filtreras bort."""
     ut: List[Tuple[float, float, float]] = []
     for p in frame_punkter:
         try:
@@ -97,15 +99,17 @@ def _projicera_punkter_till_portrait(
         except (TypeError, ValueError):
             continue
         cam = T_inv @ np.array([X, Y, Z, 1.0])
-        zc = float(cam[2])
-        if zc <= 0.1:
+        # ARKit → CV konvention (Y och Z flippas)
+        xc_cv = float(cam[0])
+        yc_cv = -float(cam[1])
+        djup = -float(cam[2])
+        if djup <= 0.1:
             continue
-        xc = float(cam[0]); yc = float(cam[1])
-        u_L = fx_L * xc / zc + cx_L
-        v_L = fy_L * yc / zc + cy_L
+        u_L = fx_L * xc_cv / djup + cx_L
+        v_L = fy_L * yc_cv / djup + cy_L
         u_P = H_L - v_L
         v_P = u_L
-        ut.append((u_P, v_P, zc))
+        ut.append((u_P, v_P, djup))
     return ut
 
 
@@ -116,15 +120,22 @@ def _back_projicera_bbox_centrum(
     fx_L: float, fy_L: float, cx_L: float, cy_L: float,
     H_L: float,
 ) -> Tuple[float, float, float]:
-    """Bbox-centrum + djup → world i ARKit-frame."""
+    """Bbox-centrum + djup_framåt → world i ARKit-frame.
+    djup är positiv framåt-distans (CV-konvention). Konverterar tillbaka till
+    ARKit camera-frame (Y ned → upp, Z framåt → bak) innan T-multiplikation."""
     x1, y1, x2, y2 = bbox
     u_P_c = (x1 + x2) / 2.0
     v_P_c = (y1 + y2) / 2.0
     u_L_c = v_P_c
     v_L_c = H_L - u_P_c
-    xc_c = (u_L_c - cx_L) * djup / fx_L
-    yc_c = (v_L_c - cy_L) * djup / fy_L
-    world = T @ np.array([xc_c, yc_c, djup, 1.0])
+    # CV-pixel → CV camera-frame (X right, Y down, Z forward)
+    xc_cv = (u_L_c - cx_L) * djup / fx_L
+    yc_cv = (v_L_c - cy_L) * djup / fy_L
+    # CV → ARKit camera-frame (Y och Z flippas)
+    xc_arkit = xc_cv
+    yc_arkit = -yc_cv
+    zc_arkit = -djup
+    world = T @ np.array([xc_arkit, yc_arkit, zc_arkit, 1.0])
     return float(world[0]), float(world[1]), float(world[2])
 
 
@@ -221,8 +232,9 @@ def extrahera_produkter_a1(
 
     # Kameraposition (för fallback)
     cam_x = float(T[0, 3]); cam_y = float(T[1, 3]); cam_z = float(T[2, 3])
-    # Yaw från transform (ARKit Y-axel)
-    rot_y = math.atan2(T[0, 2], T[2, 2])
+    # Yaw från transform (ARKit Y-axel). T[:,2] = kamerans Z-axel i world,
+    # vilket pekar BAKÅT i ARKit. Framåt-riktningen = -T[:,2].
+    rot_y = math.atan2(-T[0, 2], -T[2, 2])
 
     # ─── Dedupa kandidater på namn ───
     seen = set()
@@ -287,6 +299,15 @@ def extrahera_produkter_a1(
             säkerhet = "medium"
         else:
             säkerhet = "låg"
+
+        # Diagnos: skriv ut kamera + produkt-position så vi kan verifiera koord-fixen
+        dx = prod_x_arkit - cam_x
+        dz = prod_z_arkit - cam_z
+        avstånd = math.sqrt(dx*dx + dz*dz)
+        print(f"   🛒 {match['kanoniskt_namn'][:30]:<30} "
+              f"cam=({cam_x:+.2f},{cam_z:+.2f}) "
+              f"prod_arkit=({prod_x_arkit:+.2f},{prod_z_arkit:+.2f}) "
+              f"avstånd={avstånd:.2f}m metod={position_metod}")
 
         resultat.append({
             "visningsnamn": match["kanoniskt_namn"],
@@ -374,6 +395,183 @@ def append_produkter(karta_namn: str, nya: List[dict]) -> dict:
 
 def läs_produkter(karta_namn: str) -> List[dict]:
     fil = _karta_dir(karta_namn) / "identifierade_produkter.json"
+    if not fil.exists():
+        return []
+    try:
+        data = json.loads(fil.read_text(encoding="utf-8"))
+        return data if isinstance(data, list) else []
+    except (json.JSONDecodeError, OSError):
+        return []
+
+
+# ─────────────────────────────────────────────────────────────────
+# KONSOLIDERING — slå ihop rådata till en produkt-instans per fysisk plats
+# ─────────────────────────────────────────────────────────────────
+
+# Säkerhetsranking: hög > medium/medel > låg > okänd
+_SÄK_RANK = {"hög": 3, "medium": 2, "medel": 2, "låg": 1, "?": 0, "": 0}
+
+
+def _spatial_kluster(obs_list: List[dict], threshold: float) -> List[List[dict]]:
+    """
+    Greedy spatial clustering: tilldelar varje observation till första klustret
+    där distansen till klustrets centroid är < threshold meter.
+
+    Detta gör att samma produkt på flera fysiska platser (t.ex. samma vara
+    i mejeri OCH frukost) hamnar i separata kluster.
+    """
+    kluster: List[List[dict]] = []
+    for o in obs_list:
+        try:
+            x = float(o.get("x", 0) or 0)
+            y = float(o.get("y", 0) or 0)
+            z = float(o.get("z", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+
+        placed = False
+        for k in kluster:
+            cx = sum(float(p.get("x", 0) or 0) for p in k) / len(k)
+            cy = sum(float(p.get("y", 0) or 0) for p in k) / len(k)
+            cz = sum(float(p.get("z", 0) or 0) for p in k) / len(k)
+            d = math.sqrt((x - cx) ** 2 + (y - cy) ** 2 + (z - cz) ** 2)
+            if d < threshold:
+                k.append(o)
+                placed = True
+                break
+        if not placed:
+            kluster.append([o])
+    return kluster
+
+
+def _säkerhet_namn(rank: int) -> str:
+    if rank >= 3:
+        return "hög"
+    if rank >= 2:
+        return "medium"
+    if rank >= 1:
+        return "låg"
+    return "okänd"
+
+
+def konsolidera_produkter(
+    karta_namn: str,
+    distance_threshold: float = 1.5,
+) -> dict:
+    """
+    Konsoliderar rådata-observationer i identifierade_produkter.json till
+    produkter_konsoliderade.json där varje fysisk produkt-instans får EN rad.
+
+    Logik:
+      1. Gruppera per produkt-id.
+      2. Inom varje grupp: spatial sub-clustering (greedy) med distance_threshold.
+      3. Inom varje sub-kluster: behåll bara observationer med högst säkerhet.
+      4. Vägt medelvärde av (x, y, z) med vikt = match_score.
+
+    Returnerar summary-dict {antal_observationer, antal_kluster, fil}.
+    """
+    obs_lista = läs_produkter(karta_namn)
+    if not obs_lista:
+        return {
+            "antal_observationer": 0,
+            "antal_unika_id": 0,
+            "antal_kluster": 0,
+            "fil": "",
+        }
+
+    # 1) Gruppera per id
+    grupper: Dict[str, List[dict]] = {}
+    för_id = 0
+    for o in obs_lista:
+        i = o.get("id", "")
+        if not i:
+            continue
+        grupper.setdefault(i, []).append(o)
+        för_id += 1
+
+    konsoliderade: List[dict] = []
+
+    for prod_id, obs in grupper.items():
+        # 2) Spatial sub-clustering inom samma id
+        sub_kluster = _spatial_kluster(obs, distance_threshold)
+
+        for klust in sub_kluster:
+            # 3) Behåll bara bästa säkerhet
+            bästa_rank = max(
+                _SÄK_RANK.get(o.get("säkerhet", "?"), 0) for o in klust
+            )
+            kvar = [
+                o for o in klust
+                if _SÄK_RANK.get(o.get("säkerhet", "?"), 0) == bästa_rank
+            ]
+            if not kvar:
+                kvar = klust  # fallback (borde aldrig hända)
+
+            # 4) Vägt medel av positioner med vikt = match_score (clamp >0)
+            try:
+                vikter = np.array([
+                    max(float(o.get("match_score", 1) or 1), 0.001)
+                    for o in kvar
+                ])
+                xs = np.array([float(o.get("x", 0) or 0) for o in kvar])
+                ys = np.array([float(o.get("y", 0) or 0) for o in kvar])
+                zs = np.array([float(o.get("z", 0) or 0) for o in kvar])
+            except (TypeError, ValueError):
+                continue
+
+            w_sum = float(vikter.sum())
+            if w_sum <= 0:
+                vikter = np.ones(len(kvar)) / len(kvar)
+            else:
+                vikter = vikter / w_sum
+
+            x_med = float((xs * vikter).sum())
+            y_med = float((ys * vikter).sum())
+            z_med = float((zs * vikter).sum())
+
+            första = kvar[0]
+            bästa_score = max(
+                float(o.get("match_score", 0) or 0) for o in kvar
+            )
+
+            konsoliderade.append({
+                "id": prod_id,
+                "visningsnamn": första.get("visningsnamn", ""),
+                "varumarke": första.get("varumarke", ""),
+                "kategori": första.get("kategori", ""),
+                "bild_url": första.get("bild_url", ""),
+                "x": x_med,
+                "y": y_med,
+                "z": z_med,
+                "säkerhet": _säkerhet_namn(bästa_rank),
+                "antal_observationer": len(klust),
+                "antal_använda": len(kvar),
+                "bästa_match_score": bästa_score,
+                "konsoliderad": time.strftime("%Y-%m-%d %H:%M:%S"),
+            })
+
+    # Skriv till disk (separat lås så vi inte krockar med pågående append)
+    karta_dir = _karta_dir(karta_namn)
+    karta_dir.mkdir(parents=True, exist_ok=True)
+    fil = karta_dir / "produkter_konsoliderade.json"
+
+    lås = _hämta_skrivlås(karta_namn + "::konsoliderad")
+    with lås:
+        fil.write_text(
+            json.dumps(konsoliderade, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+    return {
+        "antal_observationer": len(obs_lista),
+        "antal_unika_id": len(grupper),
+        "antal_kluster": len(konsoliderade),
+        "fil": str(fil),
+    }
+
+
+def läs_konsoliderade(karta_namn: str) -> List[dict]:
+    fil = _karta_dir(karta_namn) / "produkter_konsoliderade.json"
     if not fil.exists():
         return []
     try:
