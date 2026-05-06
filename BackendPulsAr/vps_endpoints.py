@@ -435,6 +435,111 @@ def setup_vps_routes(app: FastAPI):
         return {"karta": karta, "produkter": läs_produkter(karta)}
 
 
+    @app.post("/produkter/konsolidera/{karta}")
+    async def konsolidera_produkter_endpoint(
+        karta: str,
+        avstånd: float = 1.5,
+    ):
+        """
+        Slår ihop rådata-observationer i identifierade_produkter.json till en
+        konsoliderad lista (en rad per fysisk produkt-instans) i
+        produkter_konsoliderade.json. Kör efter en skanningssession.
+
+        Query-param:
+          avstånd (float, default 1.5): meter inom vilka samma produkt-id
+                                       räknas som samma fysiska instans.
+        """
+        from core.produkt_skanning import konsolidera_produkter
+        info = konsolidera_produkter(karta, distance_threshold=avstånd)
+        return {"karta": karta, **info}
+
+
+    @app.get("/produkter/konsoliderade/{karta}")
+    async def lista_konsoliderade_produkter(karta: str):
+        """Listar konsoliderade produkter (en rad per fysisk instans)."""
+        from core.produkt_skanning import läs_konsoliderade
+        return {"karta": karta, "produkter": läs_konsoliderade(karta)}
+
+
+    # ─────────────────────────────────────────────
+    # NAVIGATION — Steg 2: Occupancy grid + A*
+    # ─────────────────────────────────────────────
+
+    @app.post("/navigation/grid/{karta}")
+    async def bygg_grid_endpoint(
+        karta: str,
+        cell_storlek: float = 0.10,
+        höjd_min: float = 0.30,
+        höjd_max: float = 2.00,
+        dilation: float = 0.35,
+        marginal: float = 1.0,
+    ):
+        """
+        Bygg/uppdatera occupancy_grid.npy för kartan från all_points_3d.npy.
+        Query-params styr cell-storlek, höjdfilter över golvet och
+        obstacle-dilation (= person-radius + safety).
+        """
+        from core.navigation import bygg_occupancy_grid
+        return bygg_occupancy_grid(
+            karta_namn=karta,
+            cell_storlek=cell_storlek,
+            höjd_över_golv_min=höjd_min,
+            höjd_över_golv_max=höjd_max,
+            dilation_meter=dilation,
+            marginal=marginal,
+        )
+
+
+    @app.get("/navigation/grid_meta/{karta}")
+    async def grid_meta_endpoint(karta: str):
+        """Returnerar occupancy_meta.json (grid-bounds, cell-storlek, m.m.)."""
+        from core.navigation import läs_grid_meta
+        meta = läs_grid_meta(karta)
+        if meta is None:
+            raise HTTPException(
+                status_code=404,
+                detail="occupancy_grid saknas — POST /navigation/grid/{karta} först",
+            )
+        return meta
+
+
+    @app.post("/navigation/väg")
+    async def navigation_väg_endpoint(payload: dict):
+        """
+        A*-pathfinding i kartans koordinatsystem.
+
+        Body (JSON):
+          {
+            "karta": str,
+            "start": [x, z],
+            "mål":   [x, z]   (eller "mal" om JSON-klienten klagar på å)
+          }
+
+        Returnerar:
+          { ok, waypoints: [[x,z], ...], längd_meter, antal_waypoints, ... }
+        """
+        from core.navigation import astar_väg
+
+        karta = payload.get("karta")
+        if not karta:
+            raise HTTPException(status_code=400, detail="karta saknas")
+
+        start = payload.get("start")
+        mål = payload.get("mål") or payload.get("mal") or payload.get("mål_xz")
+        if not (isinstance(start, list) and len(start) == 2):
+            raise HTTPException(status_code=400, detail="start måste vara [x, z]")
+        if not (isinstance(mål, list) and len(mål) == 2):
+            raise HTTPException(status_code=400, detail="mål måste vara [x, z]")
+
+        try:
+            start_xz = (float(start[0]), float(start[1]))
+            mål_xz = (float(mål[0]), float(mål[1]))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="Ogiltiga koordinater")
+
+        return astar_väg(start_xz, mål_xz, karta)
+
+
     @app.post("/produkter/lokalisera_för_skanning/")
     async def lokalisera_för_skanning(
         bild: UploadFile = File(...),
@@ -465,20 +570,16 @@ def setup_vps_routes(app: FastAPI):
         if not resultat.get("hittad"):
             return {"hittad": False, **resultat}
 
-        # Bygg T_karta_camera (4x4) från pose
+        # Bygg T_karta_camera (4x4) direkt från råa rotationsmatrisen.
+        # Tidigare rekonstruerades R från Euler-vinklar med Rz för yaw, vilket
+        # antar Z-up world. Men ARKit/karta är Y-up → fel rotationsaxel →
+        # transformerade koordinater fick både rotation och felaktig skala.
         x = float(resultat["x"]); y = float(resultat["y"]); z = float(resultat["z"])
-        roll = _np.deg2rad(float(resultat.get("roll", 0)))
-        pitch = _np.deg2rad(float(resultat.get("pitch", 0)))
-        yaw = _np.deg2rad(float(resultat.get("yaw", 0)))
-
-        # ZYX Euler (samma konvention som lokalisering.py extraherar)
-        Rx = _np.array([[1,0,0],[0,_np.cos(roll),-_np.sin(roll)],
-                        [0,_np.sin(roll),_np.cos(roll)]])
-        Ry = _np.array([[_np.cos(pitch),0,_np.sin(pitch)],[0,1,0],
-                        [-_np.sin(pitch),0,_np.cos(pitch)]])
-        Rz = _np.array([[_np.cos(yaw),-_np.sin(yaw),0],
-                        [_np.sin(yaw),_np.cos(yaw),0],[0,0,1]])
-        R_kc = Rz @ Ry @ Rx
+        R_kc_raw = resultat.get("R_world_from_camera")
+        if R_kc_raw is None:
+            raise HTTPException(status_code=500,
+                detail="lokalisera() returnerade ingen R_world_from_camera")
+        R_kc = _np.array(R_kc_raw, dtype=_np.float64)
 
         T_karta_camera = _np.eye(4)
         T_karta_camera[:3, :3] = R_kc

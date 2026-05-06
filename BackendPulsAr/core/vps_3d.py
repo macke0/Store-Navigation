@@ -690,6 +690,9 @@ def _lokalisera_mot_karta(
         "roll": float(np.degrees(roll)),
         "pitch": float(np.degrees(pitch)),
         "yaw": float(np.degrees(yaw)),
+        # Rå rotationsmatris (world_from_camera) så uppströms kod slipper
+        # rekonstruera från Euler-vinklar (vilket lätt blir konventions-fel).
+        "R_world_from_camera": R.T.tolist(),
         "konfidens": konfidens,
         "metod": "lightglue_pnp" if matcher else "faiss_pnp",
         "inliers": num_inliers,
