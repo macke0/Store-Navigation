@@ -596,6 +596,15 @@ def setup_vps_routes(app: FastAPI):
         # Returnera column-major flat (samma format som iOS använder)
         flat = T_arkit_till_karta.T.reshape(-1).tolist()
 
+        # Spara även som live-position så 3D-viewerns Live-knapp kan visa
+        # var iOS just lokaliserade sig (för felsökning av PnP-pose).
+        _senaste_lokalisering[karta] = {
+            "x": x, "y": y, "z": z,
+            "yaw": float(resultat.get("yaw", 0)),
+            "konfidens": resultat.get("konfidens", "okänd"),
+            "t": time.time(),
+        }
+
         return {
             "hittad": True,
             "pose": {
