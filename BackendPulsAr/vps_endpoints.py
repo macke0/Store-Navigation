@@ -420,6 +420,31 @@ def setup_vps_routes(app: FastAPI):
             frame_id=int(frame_id),
         )
         info = append_produkter(karta, nya)
+
+        # Uppdatera live-position så 3D-viewerns Live-prick följer kameran
+        # under hela skanningen (inte bara vid lokalisering).
+        if t_ak is not None and isinstance(t, list) and len(t) == 16:
+            try:
+                import numpy as _np
+                T_ak_mat = _np.array(t_ak, dtype=_np.float64).reshape(4, 4).T
+                T_arkit_cam = _np.array(t, dtype=_np.float64).reshape(4, 4).T
+                cam_arkit = T_arkit_cam[:3, 3]
+                cam_karta_h = T_ak_mat @ _np.array([cam_arkit[0], cam_arkit[1], cam_arkit[2], 1.0])
+                # Yaw från ARKit-kamerans Z-axel transformerad genom T_ak
+                arkit_z = T_arkit_cam[:3, 2]
+                karta_z = T_ak_mat[:3, :3] @ arkit_z
+                yaw = float(_np.arctan2(-karta_z[0], -karta_z[2]))
+                _senaste_lokalisering[karta] = {
+                    "x": float(cam_karta_h[0]),
+                    "y": float(cam_karta_h[1]),
+                    "z": float(cam_karta_h[2]),
+                    "yaw": yaw,
+                    "konfidens": "skanning",
+                    "t": time.time(),
+                }
+            except Exception:
+                pass
+
         return {
             "hittad": len(nya) > 0,
             "produkter": nya,
