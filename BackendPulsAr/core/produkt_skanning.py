@@ -224,6 +224,11 @@ def extrahera_produkter_a1(
         frame_punkter, T, T_inv, fx_L, fy_L, cx_L, cy_L, H_L
     )
 
+    # Diagnos: visa hur många LiDAR-punkter vi har att jobba med
+    print(f"   📊 Diag: in={len(frame_punkter)} punkter, "
+          f"projicerade_framåt={len(projicerade)}, "
+          f"intrinsics fx_P={fx_P:.1f} cx_P={cx_P:.1f} cy_P={cy_P:.1f} H_L={H_L:.0f}")
+
     # Median-djup som fallback
     giltiga_z = [zc for (_, _, zc) in projicerade if 0.3 < zc < 5.0]
     median_djup = float(np.median(giltiga_z)) if giltiga_z else 1.5
