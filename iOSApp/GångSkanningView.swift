@@ -569,11 +569,13 @@ class GångSkanningManager: NSObject, ObservableObject, ARSessionDelegate {
                 let u_landscape = Float(col) / Float(depthWidth) * Float(imageWidth)
                 let v_landscape = Float(row) / Float(depthHeight) * Float(imageHeight)
                 
-                // Konvertera till 3D med LANDSCAPE koordinater och intrinsics
-                let x_cam = (u_landscape - cx) * depth / fx
-                let y_cam = (v_landscape - cy) * depth / fy
-                let z_cam = depth
-                
+                // ARKit camera-frame: +X right, +Y up, +Z BAKÅT.
+                // Bild-pixlar har +V nedåt, depth pekar framåt → flip Y och Z
+                // innan multiplikation med cameraTransform (ARKit world_from_camera).
+                let x_cam =  (u_landscape - cx) * depth / fx
+                let y_cam = -(v_landscape - cy) * depth / fy
+                let z_cam = -depth
+
                 // Transformera till världskoordinater
                 let camPoint = SIMD4<Float>(x_cam, y_cam, z_cam, 1.0)
                 let worldPoint = cameraTransform * camPoint

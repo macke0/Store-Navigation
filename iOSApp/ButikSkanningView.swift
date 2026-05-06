@@ -485,6 +485,31 @@ class ButikSkanningManager: NSObject, ObservableObject, ARSessionDelegate {
         print("⏹️ Stoppar skanning")
         print("   Frames: \(antalFrames)")
         print("   3D-punkter: \(punkter3D.count)")
+
+        // ── Exportera fullständig LiDAR-mesh som mesh.glb ──
+        // Detta innehåller golv, möbler och allt LiDAR triangulerade,
+        // till skillnad från RoomPlan som bara ger väggar/fönster/dörrar.
+        if let mapp = skanningsmapp {
+            // Räkna ARMeshAnchors innan vi försöker exportera (för diagnostik)
+            let allaAnchors = session?.currentFrame?.anchors ?? []
+            let meshAnchorsNu = allaAnchors.compactMap { $0 as? ARMeshAnchor }.count
+            var status = ""
+            do {
+                let (filURL, mb) = try MeshExporter.exportSessionsMesh(
+                    session: session,
+                    till: mapp
+                )
+                status = "OK: \(meshAnchorsNu) anchors, \(String(format: "%.2f", mb)) MB"
+                print("📦 mesh.glb skriven: \(filURL.path) (\(status))")
+            } catch {
+                status = "FAIL: \(error.localizedDescription) [anchors_just_nu=\(meshAnchorsNu), totalt_under_skanning=\(antalMeshAnchors)]"
+                print("⚠️ Kunde inte exportera mesh.glb: \(status)")
+            }
+            // Skriv status till disk så ServerUploader kan skicka det till servern
+            // (ett sätt att se resultatet utan Xcode-konsol)
+            let statusURL = mapp.appendingPathComponent("mesh_status.txt")
+            try? status.data(using: .utf8)?.write(to: statusURL)
+        }
     }
     //Kolla att det överlappar
     func laddaTäckning(serverURL: String) async {
@@ -838,11 +863,14 @@ class ButikSkanningManager: NSObject, ObservableObject, ARSessionDelegate {
                 
                 let u_landscape = Float(col) / Float(depthWidth) * Float(imageWidth)
                 let v_landscape = Float(row) / Float(depthHeight) * Float(imageHeight)
-                
-                let x_cam = (u_landscape - cx) * depth / fx
-                let y_cam = (v_landscape - cy) * depth / fy
-                let z_cam = depth
-                
+
+                // ARKit camera-frame: +X right, +Y up, +Z BAKÅT.
+                // Bild-pixlar har +V nedåt, depth pekar framåt → flip Y och Z
+                // innan multiplikation med cameraTransform (som är ARKit world_from_camera).
+                let x_cam =  (u_landscape - cx) * depth / fx
+                let y_cam = -(v_landscape - cy) * depth / fy
+                let z_cam = -depth
+
                 let camPoint = SIMD4<Float>(x_cam, y_cam, z_cam, 1.0)
                 let worldPoint = cameraTransform * camPoint
                 
