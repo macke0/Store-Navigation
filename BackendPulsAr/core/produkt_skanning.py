@@ -325,9 +325,16 @@ def extrahera_produkter_a1(
         dx = prod_x_arkit - cam_x
         dz = prod_z_arkit - cam_z
         avstånd = math.sqrt(dx*dx + dz*dz)
+        # Kamerapos i karta-frame (för att jämföra mot path)
+        if T_ak is not None:
+            cam_karta_v = T_ak @ np.array([cam_x, cam_y, cam_z, 1.0])
+            cam_karta_str = f" cam_karta=({float(cam_karta_v[0]):+.2f},{float(cam_karta_v[2]):+.2f})"
+        else:
+            cam_karta_str = " cam_karta=(ingen T_ak)"
         print(f"   🛒 {match['kanoniskt_namn'][:30]:<30} "
               f"cam=({cam_x:+.2f},{cam_z:+.2f}) "
               f"prod_arkit=({prod_x_arkit:+.2f},{prod_z_arkit:+.2f}) "
+              f"prod_karta=({prod_x:+.2f},{prod_z:+.2f}){cam_karta_str} "
               f"avstånd={avstånd:.2f}m metod={position_metod}")
 
         resultat.append({
