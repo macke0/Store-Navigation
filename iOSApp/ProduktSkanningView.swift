@@ -622,9 +622,12 @@ class ProduktSkanningManager: NSObject, ObservableObject, ARSessionDelegate {
                 let u_landscape = Float(col) / Float(depthWidth) * Float(imageWidth)
                 let v_landscape = Float(row) / Float(depthHeight) * Float(imageHeight)
 
-                let x_cam = (u_landscape - cx) * depth / fx
-                let y_cam = (v_landscape - cy) * depth / fy
-                let z_cam = depth
+                // ARKit camera-frame: +X right, +Y up, +Z BAKÅT.
+                // Bild-pixlar har +V nedåt, depth pekar framåt.
+                // Konvertera CV-pinhole → ARKit camera-frame (flip Y och Z).
+                let x_cam =  (u_landscape - cx) * depth / fx
+                let y_cam = -(v_landscape - cy) * depth / fy
+                let z_cam = -depth
 
                 let camPoint = SIMD4<Float>(x_cam, y_cam, z_cam, 1.0)
                 let worldPoint = cameraTransform * camPoint
