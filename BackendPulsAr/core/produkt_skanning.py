@@ -164,30 +164,56 @@ def _hämta_path_medel_y(karta_namn: str) -> float:
     return medel
 
 
+def _extrahera_yaw_från_T_ak(T_ak: np.ndarray) -> float:
+    """Plocka ut yaw-rotation (runt Y) ur en 4x4 transform.
+    Vi antar Y-up world; T_ak's tredje kolumn är kamerans Z-axel i karta.
+    yaw = atan2(forward_x, forward_z) där forward = -Z-axeln (ARKit-konvention)."""
+    cz = T_ak[:3, 2]  # Z-kolumnen
+    # Negera för att få framåt-riktning i Y-up XZ-plan
+    return float(np.arctan2(-cz[0], -cz[2]))
+
+
 def _transformera_arkit_till_karta(
     p_arkit: Tuple[float, float, float],
     T_arkit_till_karta: Optional[np.ndarray],
     cam_arkit: Optional[Tuple[float, float, float]] = None,
     karta_namn: Optional[str] = None,
 ) -> Tuple[float, float, float]:
-    """Multiplicera (x,y,z) med 4x4 transform. Identitet om transform saknas.
+    """Hybrid C: använd ENDAST yaw från T_ak, ankra translation vid kameran.
 
-    OBS Y-axeln: VPS-lokaliseringens PnP ger ofta felaktig Y-pose (kameran
-    placeras under kartan). Pragmatisk fix: lås produkt-Y till path-medel-Y
-    plus ARKit-relativ delta. Produkter hamnar då på rimlig hyllhöjd men
-    förlorar exakt vertikal precision. Bättre lösning kräver PnP-tuning."""
+    Bakgrund: full T_ak från VPS-lokalisering har ofta tilt/skala-fel som
+    sprider produkter över hela kartan. Genom att bara behålla yaw-rotationen
+    (runt gravity-axeln Y) och ankra positionen vid kamerans nuvarande pose,
+    får vi ARKit-precision för relativa avstånd från kameran och bara
+    yaw-orientering från PnP. Y låses till path-höjd."""
     if T_arkit_till_karta is None:
         return p_arkit
-    v = np.array([p_arkit[0], p_arkit[1], p_arkit[2], 1.0])
-    w = T_arkit_till_karta @ v
-    if cam_arkit is not None and karta_namn is not None:
-        path_y = _hämta_path_medel_y(karta_namn)
-        # Behåll vertikal skillnad mellan produkt och kamera (gravity-aligned).
-        # Då hamnar produkten på path-höjd ± hur mycket den var ovanför/under
-        # kameran enligt bbox-back-projektionen.
-        delta_y = p_arkit[1] - cam_arkit[1]
-        return float(w[0]), path_y + delta_y, float(w[2])
-    return float(w[0]), float(w[1]), float(w[2])
+    if cam_arkit is None or karta_namn is None:
+        # Fallback: full transform
+        v = np.array([p_arkit[0], p_arkit[1], p_arkit[2], 1.0])
+        w = T_arkit_till_karta @ v
+        return float(w[0]), float(w[1]), float(w[2])
+
+    # Yaw-only rotation runt Y-axeln
+    yaw = _extrahera_yaw_från_T_ak(T_arkit_till_karta)
+    cos_y, sin_y = float(np.cos(yaw)), float(np.sin(yaw))
+    # Vad PnP säger att kameran är just nu i karta
+    cam_v = np.array([cam_arkit[0], cam_arkit[1], cam_arkit[2], 1.0])
+    cam_karta = T_arkit_till_karta @ cam_v
+    # Relativ position från kamera i ARKit
+    dx = p_arkit[0] - cam_arkit[0]
+    dz = p_arkit[2] - cam_arkit[2]
+    # Rotera bara XZ med yaw (ignorera roll/pitch som annars skulle blanda in Y)
+    rot_dx = cos_y * dx + sin_y * dz
+    rot_dz = -sin_y * dx + cos_y * dz
+    # Ankra: cam_karta + roterad delta
+    px = float(cam_karta[0]) + rot_dx
+    pz = float(cam_karta[2]) + rot_dz
+    # Y: path-höjd + ARKit-Y-delta från kameran
+    path_y = _hämta_path_medel_y(karta_namn)
+    delta_y = p_arkit[1] - cam_arkit[1]
+    py = path_y + delta_y
+    return px, py, pz
 
 
 # ─────────────────────────────────────────────────────────────────
