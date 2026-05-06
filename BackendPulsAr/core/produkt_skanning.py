@@ -139,28 +139,54 @@ def _back_projicera_bbox_centrum(
     return float(world[0]), float(world[1]), float(world[2])
 
 
+_path_y_cache: Dict[str, float] = {}
+
+
+def _hämta_path_medel_y(karta_namn: str) -> float:
+    """Räkna medel-Y från senaste sessionens path. Cachas per process."""
+    if karta_namn in _path_y_cache:
+        return _path_y_cache[karta_namn]
+    try:
+        sessioner = sorted(
+            Path("/home/hartman/ICA_ai/BackendPulsAr/data/butik_modell/sessioner").glob(
+                "session_*/positioner.json"),
+            key=lambda f: f.stat().st_mtime
+        )
+        if not sessioner:
+            _path_y_cache[karta_namn] = 0.0
+            return 0.0
+        data = json.loads(sessioner[-1].read_text())
+        ys = [p.get("y", 0) for p in data]
+        medel = float(sum(ys) / len(ys)) if ys else 0.0
+    except Exception:
+        medel = 0.0
+    _path_y_cache[karta_namn] = medel
+    return medel
+
+
 def _transformera_arkit_till_karta(
     p_arkit: Tuple[float, float, float],
     T_arkit_till_karta: Optional[np.ndarray],
     cam_arkit: Optional[Tuple[float, float, float]] = None,
+    karta_namn: Optional[str] = None,
 ) -> Tuple[float, float, float]:
     """Multiplicera (x,y,z) med 4x4 transform. Identitet om transform saknas.
 
-    OBS Y-axeln: både ARKit och kart-frame är gravitations-justerade, så Y
-    skall idealt bara translateras (inte roteras). Men VPS-lokaliseringens
-    PnP ger 6-DOF-pose med små roll/pitch-fel som blandar in X/Z i Y och
-    sprider produkt-höjder med flera meter. Om cam_arkit ges räknar vi ut
-    Y-offset från kamera-translationen och translaterar ARKit-Y direkt,
-    vilket sidsteg-skär tilt-felet."""
+    OBS Y-axeln: VPS-lokaliseringens PnP ger ofta felaktig Y-pose (kameran
+    placeras under kartan). Pragmatisk fix: lås produkt-Y till path-medel-Y
+    plus ARKit-relativ delta. Produkter hamnar då på rimlig hyllhöjd men
+    förlorar exakt vertikal precision. Bättre lösning kräver PnP-tuning."""
     if T_arkit_till_karta is None:
         return p_arkit
     v = np.array([p_arkit[0], p_arkit[1], p_arkit[2], 1.0])
     w = T_arkit_till_karta @ v
-    if cam_arkit is not None:
-        cam_v = np.array([cam_arkit[0], cam_arkit[1], cam_arkit[2], 1.0])
-        cam_karta = T_arkit_till_karta @ cam_v
-        y_offset = float(cam_karta[1]) - float(cam_arkit[1])
-        return float(w[0]), float(p_arkit[1]) + y_offset, float(w[2])
+    if cam_arkit is not None and karta_namn is not None:
+        path_y = _hämta_path_medel_y(karta_namn)
+        # Behåll vertikal skillnad mellan produkt och kamera (gravity-aligned).
+        # Då hamnar produkten på path-höjd ± hur mycket den var ovanför/under
+        # kameran enligt bbox-back-projektionen.
+        delta_y = p_arkit[1] - cam_arkit[1]
+        return float(w[0]), path_y + delta_y, float(w[2])
     return float(w[0]), float(w[1]), float(w[2])
 
 
@@ -305,11 +331,12 @@ def extrahera_produkter_a1(
             continue
 
         # Transformera till karta-frame.
-        # Skicka cam_arkit så Y-translation kan beräknas separat från rotation
-        # (T_ak har ofta tilt-fel som annars sprider Y med flera meter).
+        # Y låses till path-medel-Y + delta så produkter hamnar på rimlig
+        # hyllhöjd även om PnP-pose har Y-fel (vilket den ofta har).
         prod_x, prod_y, prod_z = _transformera_arkit_till_karta(
             (prod_x_arkit, prod_y_arkit, prod_z_arkit), T_ak,
             cam_arkit=(cam_x, cam_y, cam_z),
+            karta_namn="hela_butiken",  # TODO: ta från endpoint-arg
         )
 
         # Säkerhetsbedömning
