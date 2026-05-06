@@ -142,12 +142,25 @@ def _back_projicera_bbox_centrum(
 def _transformera_arkit_till_karta(
     p_arkit: Tuple[float, float, float],
     T_arkit_till_karta: Optional[np.ndarray],
+    cam_arkit: Optional[Tuple[float, float, float]] = None,
 ) -> Tuple[float, float, float]:
-    """Multiplicera (x,y,z) med 4x4 transform. Identitet om transform saknas."""
+    """Multiplicera (x,y,z) med 4x4 transform. Identitet om transform saknas.
+
+    OBS Y-axeln: både ARKit och kart-frame är gravitations-justerade, så Y
+    skall idealt bara translateras (inte roteras). Men VPS-lokaliseringens
+    PnP ger 6-DOF-pose med små roll/pitch-fel som blandar in X/Z i Y och
+    sprider produkt-höjder med flera meter. Om cam_arkit ges räknar vi ut
+    Y-offset från kamera-translationen och translaterar ARKit-Y direkt,
+    vilket sidsteg-skär tilt-felet."""
     if T_arkit_till_karta is None:
         return p_arkit
     v = np.array([p_arkit[0], p_arkit[1], p_arkit[2], 1.0])
     w = T_arkit_till_karta @ v
+    if cam_arkit is not None:
+        cam_v = np.array([cam_arkit[0], cam_arkit[1], cam_arkit[2], 1.0])
+        cam_karta = T_arkit_till_karta @ cam_v
+        y_offset = float(cam_karta[1]) - float(cam_arkit[1])
+        return float(w[0]), float(p_arkit[1]) + y_offset, float(w[2])
     return float(w[0]), float(w[1]), float(w[2])
 
 
@@ -291,9 +304,12 @@ def extrahera_produkter_a1(
                 math.isnan(prod_z_arkit)):
             continue
 
-        # Transformera till karta-frame
+        # Transformera till karta-frame.
+        # Skicka cam_arkit så Y-translation kan beräknas separat från rotation
+        # (T_ak har ofta tilt-fel som annars sprider Y med flera meter).
         prod_x, prod_y, prod_z = _transformera_arkit_till_karta(
-            (prod_x_arkit, prod_y_arkit, prod_z_arkit), T_ak
+            (prod_x_arkit, prod_y_arkit, prod_z_arkit), T_ak,
+            cam_arkit=(cam_x, cam_y, cam_z),
         )
 
         # Säkerhetsbedömning
