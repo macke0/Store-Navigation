@@ -77,10 +77,10 @@ def setup_vps_routes(app: FastAPI):
         }
     
     
-    @app.get("/vps/karta/{gång_namn}")
-    async def vps_karta_detaljer(gång_namn: str):
+    @app.get("/vps/karta/{gang_namn}")
+    async def vps_karta_detaljer(gang_namn: str):
         """Returnerar detaljer för en specifik karta."""
-        säker_namn = gång_namn.replace(" ", "_").replace("/", "_")
+        säker_namn = gang_namn.replace(" ", "_").replace("/", "_")
         karta_dir = f"/tmp/kartor/{säker_namn}"
         
         if not os.path.exists(karta_dir):
@@ -100,33 +100,33 @@ def setup_vps_routes(app: FastAPI):
                 positioner = json.load(f)
         
         return {
-            "gång": gång_namn,
+            "gång": gang_namn,
             "metadata": meta,
             "antal_positioner": len(positioner),
         }
     
     
-    @app.delete("/vps/karta/{gång_namn}")
-    async def vps_radera_karta(gång_namn: str):
+    @app.delete("/vps/karta/{gang_namn}")
+    async def vps_radera_karta(gang_namn: str):
         """Raderar en VPS-karta."""
         from core.feature_karta import radera_karta
         
         # Normalisera namnet
-        gång_namn = gång_namn.replace("_", " ")
+        gang_namn = gang_namn.replace("_", " ")
         
-        if radera_karta(gång_namn):
-            return {"raderad": True, "gång": gång_namn}
+        if radera_karta(gang_namn):
+            return {"raderad": True, "gång": gang_namn}
         else:
             raise HTTPException(status_code=404, detail="Karta finns inte")
     
     
-    @app.post("/vps/rebuild/{gång_namn}")
-    async def vps_bygg_om_karta(gång_namn: str):
+    @app.post("/vps/rebuild/{gang_namn}")
+    async def vps_bygg_om_karta(gang_namn: str):
         """Bygger om en karta från befintlig skanning."""
         from core.feature_karta import bygg_karta, radera_karta
         
         # Normalisera namnet
-        gång_namn = gång_namn.replace("_", " ")
+        gang_namn = gang_namn.replace("_", " ")
         
         # Hitta skanning
         gång_index_fil = "/tmp/gång_index.json"
@@ -136,9 +136,9 @@ def setup_vps_routes(app: FastAPI):
         with open(gång_index_fil) as f:
             gång_index = json.load(f)
         
-        skanning_dir = gång_index.get(gång_namn)
+        skanning_dir = gång_index.get(gang_namn)
         if not skanning_dir:
-            raise HTTPException(status_code=404, detail=f"Skanning för {gång_namn} finns inte")
+            raise HTTPException(status_code=404, detail=f"Skanning för {gang_namn} finns inte")
         
         pos_fil = f"{skanning_dir}/positioner.json"
         if not os.path.exists(pos_fil):
@@ -148,13 +148,13 @@ def setup_vps_routes(app: FastAPI):
             positioner = json.load(f)
         
         # Radera gammal karta
-        radera_karta(gång_namn)
+        radera_karta(gang_namn)
         
         # Bygg om
-        resultat = bygg_karta(skanning_dir, positioner, gång_namn)
+        resultat = bygg_karta(skanning_dir, positioner, gang_namn)
         
         if resultat:
-            return {"ombyggd": True, "gång": gång_namn, "karta_dir": resultat}
+            return {"ombyggd": True, "gång": gang_namn, "karta_dir": resultat}
         else:
             raise HTTPException(status_code=500, detail="Kunde inte bygga karta")
     
@@ -163,8 +163,8 @@ def setup_vps_routes(app: FastAPI):
     # MERGE SKANNINGAR
     # ─────────────────────────────────────────────
     
-    @app.post("/vps/merge/{gång_namn}")
-    async def vps_merge_skanning(gång_namn: str, skanning_id: Optional[str] = None):
+    @app.post("/vps/merge/{gang_namn}")
+    async def vps_merge_skanning(gang_namn: str, skanning_id: Optional[str] = None):
         """
         Slår ihop en ny skanning med befintlig karta.
         Om skanning_id inte anges, används den senaste skanningen för gången.
@@ -172,7 +172,7 @@ def setup_vps_routes(app: FastAPI):
         from core.feature_karta import slå_ihop_skanningar
         
         # Normalisera namnet
-        gång_namn = gång_namn.replace("_", " ")
+        gang_namn = gang_namn.replace("_", " ")
         
         # Hitta skanning
         gång_index_fil = "/tmp/gång_index.json"
@@ -182,9 +182,9 @@ def setup_vps_routes(app: FastAPI):
         with open(gång_index_fil) as f:
             gång_index = json.load(f)
         
-        skanning_dir = gång_index.get(gång_namn)
+        skanning_dir = gång_index.get(gang_namn)
         if not skanning_dir:
-            raise HTTPException(status_code=404, detail=f"Skanning för {gång_namn} finns inte")
+            raise HTTPException(status_code=404, detail=f"Skanning för {gang_namn} finns inte")
         
         pos_fil = f"{skanning_dir}/positioner.json"
         if not os.path.exists(pos_fil):
@@ -194,19 +194,19 @@ def setup_vps_routes(app: FastAPI):
             positioner = json.load(f)
         
         # Merge
-        resultat = slå_ihop_skanningar(gång_namn, skanning_dir, positioner)
+        resultat = slå_ihop_skanningar(gang_namn, skanning_dir, positioner)
         
         return resultat
     
     
-    @app.get("/vps/tackning/{gång_namn}")
-    async def vps_täckning(gång_namn: str):
+    @app.get("/vps/tackning/{gang_namn}")
+    async def vps_täckning(gang_namn: str):
         """Analyserar täckningen för en karta."""
         from core.feature_karta import beräkna_täckning, detektera_loopar, hitta_luckor
         
         # Normalisera namnet
-        gång_namn = gång_namn.replace("_", " ")
-        säker_namn = gång_namn.replace(" ", "_")
+        gang_namn = gang_namn.replace("_", " ")
+        säker_namn = gang_namn.replace(" ", "_")
         karta_dir = f"/tmp/kartor/{säker_namn}"
         
         pos_path = f"{karta_dir}/positioner.json"
@@ -222,7 +222,7 @@ def setup_vps_routes(app: FastAPI):
         luckor = hitta_luckor(positioner)
         
         return {
-            "gång": gång_namn,
+            "gång": gang_namn,
             "täckning": täckning,
             "loopar": len(loopar),
             "loop_detaljer": loopar[:10],  # Max 10 visas
@@ -365,10 +365,10 @@ def setup_vps_routes(app: FastAPI):
         return {"hittad": len(nya) > 0, "produkter": nya, **info}
 
 
-    @app.get("/vps/karta/{gång_namn}/produkter")
-    async def lista_produkter(gång_namn: str):
+    @app.get("/vps/karta/{gang_namn}/produkter")
+    async def lista_produkter(gang_namn: str):
         from core.produkt_extraktion import läs_produkter
-        return {"produkter": läs_produkter(gång_namn)}
+        return {"produkter": läs_produkter(gang_namn)}
 
 
     # ─────────────────────────────────────────────
@@ -645,13 +645,13 @@ def setup_vps_routes(app: FastAPI):
         return {"ok": True, "gång": gång}
 
 
-    @app.get("/vps/karta/{gång_namn}/lokalisering-senaste")
-    async def hämta_senaste_lokalisering(gång_namn: str):
+    @app.get("/vps/karta/{gang_namn}/lokalisering-senaste")
+    async def hämta_senaste_lokalisering(gang_namn: str):
         """
         3D-viewern pollar denna varje sekund.
         Returnerar 404 om ingen position eller om den är äldre än 8 sek.
         """
-        info = _senaste_lokalisering.get(gång_namn)
+        info = _senaste_lokalisering.get(gang_namn)
         if not info:
             return JSONResponse(status_code=404, content={"error": "ingen position"})
         if time.time() - info["t"] > 8.0:
