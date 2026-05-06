@@ -358,9 +358,10 @@ def _hämta_skrivlås(karta_namn: str) -> threading.Lock:
 
 
 def _karta_dir(karta_namn: str) -> Path:
-    """Samma sökväg som kart-skanningen använder (vps_3d.bygg_3d_karta)."""
-    säker = karta_namn.replace(" ", "_").replace("/", "_")
-    return Path(f"/home/hartman/ICA_ai/BackendPulsAr/data/kartor/{säker}")
+    """Skriv produkter där viewern och /vps/karta/{gång}/produkter läser dem.
+    Tidigare pekade detta på data/kartor/{namn}/ — fel katalog. Butik-skanningen
+    och 3D-viewern använder data/butik_modell/identifierade_produkter.json."""
+    return Path("/home/hartman/ICA_ai/BackendPulsAr/data/butik_modell")
 
 
 def append_produkter(karta_namn: str, nya: List[dict]) -> dict:
