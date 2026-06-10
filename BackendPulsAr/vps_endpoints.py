@@ -606,6 +606,16 @@ def setup_vps_routes(app: FastAPI):
                 detail="lokalisera() returnerade ingen R_world_from_camera")
         R_kc = _np.array(R_kc_raw, dtype=_np.float64)
 
+        # R_world_from_camera kommer från cv2.solvePnP → OpenCV-kamerabas
+        # (+X höger, +Y NED, +Z FRAMÅT). iOS T_arkit_camera är i ARKit-bas
+        # (+X höger, +Y UPP, +Z BAKÅT). Baserna skiljer sig med diag(1,-1,-1)
+        # (flip Y och Z). Utan denna konvertering får T_ak ett 180°-fel runt
+        # X-axeln: position stämmer (translation oberoende av kamerabas) men
+        # all rörelse och kompass-riktning blir speglad. Konvertera CV→ARKit:
+        #   R_world←ARKitCam = R_world←CVCam @ diag(1,-1,-1)
+        cv_till_arkit = _np.diag([1.0, -1.0, -1.0])
+        R_kc = R_kc @ cv_till_arkit
+
         T_karta_camera = _np.eye(4)
         T_karta_camera[:3, :3] = R_kc
         T_karta_camera[:3, 3] = [x, y, z]
