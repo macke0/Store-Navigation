@@ -16,6 +16,7 @@ Flöde:
 import json
 import anthropic
 
+from core.matratt_bilder import hämta_matbild
 from core.produkt_sok import get_produkt_sök
 from core.produkt_skanning import läs_konsoliderade
 
@@ -215,7 +216,13 @@ def foresla_matratter(meddelande: str, karta: str = "hela_butiken") -> dict:
             if ord_pris is not None:
                 ordinarie += ord_pris
 
-        bild = _välj_bild(ingredienser, rätt.get("huvudingrediens"))
+        # Riktigt matfoto (Pexels) med rättnamn → huvudingrediens som fallback,
+        # och produktbilden som sista utväg.
+        bild = (
+            hämta_matbild(rätt.get("namn") or "")
+            or hämta_matbild(rätt.get("huvudingrediens") or "")
+            or _välj_bild(ingredienser, rätt.get("huvudingrediens"))
+        )
 
         matratter.append({
             "namn":         rätt.get("namn"),
