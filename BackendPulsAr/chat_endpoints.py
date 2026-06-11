@@ -164,6 +164,15 @@ async def kund_assistent(request: KundAssistentRequest):
             session_manager.sessioner.get(session_id, [])
         )
 
+        # Berika med kartposition så att klienten kan navigera direkt
+        # utan att slå upp positionen separat.
+        for p in produkter:
+            pos = produkt_db.get(p.get("produkt_id"))
+            if pos:
+                p["x"] = pos.get("x")
+                p["y"] = pos.get("y")
+                p["z"] = pos.get("z")
+
         return KundAssistentResponse(
             svar=resultat["svar"],
             session_id=session_id,
