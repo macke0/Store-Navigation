@@ -453,6 +453,47 @@ def setup_vps_routes(app: FastAPI):
         }
 
 
+    @app.post("/produkter/live_pos/")
+    async def live_pos_endpoint(
+        karta: str = Form(...),
+        transform: str = Form(...),               # JSON-array, 16 floats column-major
+        T_arkit_till_karta: str = Form(...),      # JSON-array, 16 floats column-major
+    ):
+        """
+        Lättviktig live-positionsuppdatering. Tar bara ARKit-kameratransform +
+        T_arkit→karta, räknar ut kartpositionen och lagrar den i
+        _senaste_lokalisering. Ingen bild, LiDAR eller Qwen → kan kallas ofta
+        (flera Hz) så 3D-viewerns Live-prick följer kameran mjukt under skanning.
+        """
+        try:
+            t = json.loads(transform)
+            t_ak = json.loads(T_arkit_till_karta)
+            if not (isinstance(t, list) and len(t) == 16
+                    and isinstance(t_ak, list) and len(t_ak) == 16):
+                raise HTTPException(status_code=400, detail="transform/T_ak måste vara 16 floats")
+        except (json.JSONDecodeError, ValueError) as e:
+            raise HTTPException(status_code=400, detail=f"Ogiltig JSON: {e}")
+
+        import numpy as _np
+        T_ak_mat = _np.array(t_ak, dtype=_np.float64).reshape(4, 4).T
+        T_arkit_cam = _np.array(t, dtype=_np.float64).reshape(4, 4).T
+        cam_arkit = T_arkit_cam[:3, 3]
+        cam_karta_h = T_ak_mat @ _np.array([cam_arkit[0], cam_arkit[1], cam_arkit[2], 1.0])
+        arkit_z = T_arkit_cam[:3, 2]
+        karta_z = T_ak_mat[:3, :3] @ arkit_z
+        yaw = float(_np.arctan2(-karta_z[0], -karta_z[2]))
+        _senaste_lokalisering[karta] = {
+            "x": float(cam_karta_h[0]),
+            "y": float(cam_karta_h[1]),
+            "z": float(cam_karta_h[2]),
+            "yaw": yaw,
+            "konfidens": "live",
+            "t": time.time(),
+        }
+        return {"x": float(cam_karta_h[0]), "y": float(cam_karta_h[1]),
+                "z": float(cam_karta_h[2]), "yaw": yaw}
+
+
     @app.get("/produkter/lista/{karta}")
     async def lista_skannade_produkter(karta: str):
         """Listar alla produkter som skannats in via Läge 2."""
@@ -563,6 +604,107 @@ def setup_vps_routes(app: FastAPI):
             raise HTTPException(status_code=400, detail="Ogiltiga koordinater")
 
         return astar_väg(start_xz, mål_xz, karta)
+
+
+    @app.post("/kund/hitta-produkt")
+    async def kund_hitta_produkt(payload: dict):
+        """
+        Kund-flöde: hitta en produkt i kartan och beräkna väg dit.
+
+        Body (JSON):
+          {
+            "karta": str,
+            "produkt_id": str,            # valfri
+            "produktnamn": str,           # valfri (används om produkt_id saknas)
+            "nuvarande_position": [x, z]  # kundens nuvarande kartposition
+          }
+        Minst en av produkt_id / produktnamn krävs.
+
+        Returnerar:
+          { hittad, produkt: {...}, väg_ok, waypoints, längd_meter, antal_waypoints }
+        """
+        from core.navigation import astar_väg, läs_grid
+        from core.produkt_skanning import läs_konsoliderade
+        from core.produkt_sok import get_produkt_sök
+
+        karta = payload.get("karta")
+        if not karta:
+            raise HTTPException(status_code=400, detail="karta saknas")
+
+        produkt_id = payload.get("produkt_id")
+        produktnamn = payload.get("produktnamn")
+        if not produkt_id and not produktnamn:
+            raise HTTPException(
+                status_code=400,
+                detail="minst en av produkt_id / produktnamn krävs",
+            )
+
+        pos = payload.get("nuvarande_position")
+        if not (isinstance(pos, list) and len(pos) == 2):
+            raise HTTPException(
+                status_code=400, detail="nuvarande_position måste vara [x, z]"
+            )
+        try:
+            start_xz = (float(pos[0]), float(pos[1]))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="Ogiltig nuvarande_position")
+
+        produkter = läs_konsoliderade(karta)
+
+        # Hitta målprodukten i kartan
+        produkt = None
+        if produkt_id:
+            produkt = next((p for p in produkter if p.get("id") == produkt_id), None)
+        else:
+            namn_l = produktnamn.lower()
+            produkt = next(
+                (p for p in produkter
+                 if namn_l in str(p.get("visningsnamn", "")).lower()),
+                None,
+            )
+            # Fallback: katalogsök → matcha id mot konsoliderade
+            if produkt is None:
+                träffar = get_produkt_sök().sök(produktnamn, 1)
+                if träffar:
+                    katalog_id = träffar[0].get("id")
+                    produkt = next(
+                        (p for p in produkter if p.get("id") == katalog_id), None
+                    )
+
+        if produkt is None:
+            return {"hittad": False, "fel": "Produkt ej hittad i kartan"}
+
+        produkt_ut = {
+            "id": produkt.get("id"),
+            "visningsnamn": produkt.get("visningsnamn"),
+            "varumarke": produkt.get("varumarke"),
+            "kategori": produkt.get("kategori"),
+            "bild_url": produkt.get("bild_url"),
+            "x": produkt.get("x"),
+            "z": produkt.get("z"),
+        }
+
+        # Vägberäkning — kräver byggd occupancy_grid
+        if läs_grid(karta) is None:
+            return {
+                "hittad": True,
+                "produkt": produkt_ut,
+                "väg_ok": False,
+                "fel": f"occupancy_grid saknas — kör POST /navigation/grid/{karta}",
+            }
+
+        mål_xz = (float(produkt["x"]), float(produkt["z"]))
+        väg = astar_väg(start_xz, mål_xz, karta)
+
+        return {
+            "hittad": True,
+            "produkt": produkt_ut,
+            "väg_ok": bool(väg.get("ok")),
+            "waypoints": väg.get("waypoints", []),
+            "längd_meter": väg.get("längd_meter"),
+            "antal_waypoints": väg.get("antal_waypoints"),
+            "fel": väg.get("fel"),
+        }
 
 
     @app.post("/produkter/lokalisera_för_skanning/")

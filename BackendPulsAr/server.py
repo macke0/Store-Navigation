@@ -137,6 +137,8 @@ async def _registrera_skip_polling_filter():
 setup_sok_routes(app)
 app.include_router(vps_3d_router)
 setup_vps_routes(app)
+from chat_endpoints import chat_router
+app.include_router(chat_router, prefix="/chat", tags=["Chat"])
 app.include_router(sök_router)
 app.include_router(produkt_lista_router)
 app.include_router(viewer_router)

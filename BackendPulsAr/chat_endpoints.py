@@ -12,10 +12,12 @@ Eller kopiera in koden direkt.
 from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 from typing import Optional
+import json
 import uuid
 
 from core.claude_assistant import get_session_manager
 from core.produkt_sok import get_produkt_sök
+from core.produkt_skanning import läs_konsoliderade
 
 chat_router = APIRouter()
 
@@ -48,6 +50,49 @@ class SökResponse(BaseModel):
 class NySessionResponse(BaseModel):
     session_id: str
     meddelande: str
+
+
+class KundAssistentRequest(BaseModel):
+    meddelande: str
+    session_id: Optional[str] = None
+    karta: str = "hela_butiken"
+
+
+class KundAssistentResponse(BaseModel):
+    svar: str
+    session_id: str
+    produkter: list
+
+
+def _extrahera_produkter_ur_historik(historik: list) -> list:
+    """
+    Plocka ut produkter ur senaste tool_result i sessionshistoriken så att
+    klienten kan visa en "Hitta i butiken"-knapp per produkt.
+
+    Letar efter arrayerna produkter / alternativ / nyttigare_alternativ som
+    _kör_tool returnerar, och tar den senaste.
+    """
+    senaste: list = []
+    for meddelande in historik:
+        innehåll = meddelande.get("content")
+        if not isinstance(innehåll, list):
+            continue
+        for block in innehåll:
+            if not (isinstance(block, dict) and block.get("type") == "tool_result"):
+                continue
+            try:
+                data = json.loads(block.get("content", ""))
+            except (json.JSONDecodeError, TypeError):
+                continue
+            for nyckel in ("produkter", "alternativ", "nyttigare_alternativ"):
+                lista = data.get(nyckel)
+                if isinstance(lista, list) and lista:
+                    senaste = [
+                        {"produkt_id": p.get("id"), "visningsnamn": p.get("namn")}
+                        for p in lista
+                        if isinstance(p, dict) and p.get("id")
+                    ]
+    return senaste
 
 
 # ─────────────────────────────────────────────
@@ -83,6 +128,48 @@ async def chat_endpoint(request: ChatRequest):
             session_id=session_id
         )
     
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@chat_router.post("/kund/assistent", response_model=KundAssistentResponse)
+async def kund_assistent(request: KundAssistentRequest):
+    """
+    Kund-flöde: chatta med assistenten och få tillbaka en lista produkter som
+    klienten kan slå upp med POST /kund/hitta-produkt.
+
+    Matar in konsoliderade produktpositioner i assistentens produkt_db så att
+    verktyget hämta_produktposition kan returnera riktiga kartkoordinater.
+    """
+    try:
+        session_manager = get_session_manager()
+
+        # Mata in riktiga positioner från kartan i assistentens produkt_db
+        produkt_db = {
+            p["id"]: {
+                "visningsnamn": p.get("visningsnamn"),
+                "x": p.get("x"),
+                "y": p.get("y", 0),
+                "z": p.get("z"),
+            }
+            for p in läs_konsoliderade(request.karta)
+            if p.get("id")
+        }
+        session_manager.uppdatera_produkt_db(produkt_db)
+
+        session_id = request.session_id or str(uuid.uuid4())
+        resultat = session_manager.chat(session_id, request.meddelande)
+
+        produkter = _extrahera_produkter_ur_historik(
+            session_manager.sessioner.get(session_id, [])
+        )
+
+        return KundAssistentResponse(
+            svar=resultat["svar"],
+            session_id=session_id,
+            produkter=produkter,
+        )
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
