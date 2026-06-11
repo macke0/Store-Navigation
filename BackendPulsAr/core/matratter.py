@@ -195,6 +195,7 @@ def _generera_rätt(meddelande: str, kontext: str, tema: str) -> dict | None:
 def foresla_matratter(meddelande: str, karta: str = "hela_butiken") -> dict:
     """Returnera {matratter: [...]} berikade med riktiga priser och besparing."""
     import time
+    import threading
     from concurrent.futures import ThreadPoolExecutor
     t0 = time.perf_counter()
     sök = get_produkt_sök()
@@ -215,19 +216,31 @@ def foresla_matratter(meddelande: str, karta: str = "hela_butiken") -> dict:
             lambda tema: _generera_rätt(meddelande, kontext, tema), TEMAN
         ))
     t_claude = time.perf_counter() - t_claude0
-    t_sök = 0.0
 
-    matratter = []
-    for rätt in råa_rätter:
+    # Memoisera ingrediens-sökningar inom requesten — smör/vitlök/salt återkommer
+    # mellan rätterna och behöver bara matchas en gång (mangd skiljer sig dock).
+    match_cache: dict[str, dict] = {}
+    cache_lås = threading.Lock()
+
+    def _matcha(namn: str, mangd: str) -> dict:
+        nyckel = (namn or "").lower().strip()
+        with cache_lås:
+            bas = match_cache.get(nyckel)
+        if bas is None:
+            bas = _matcha_ingrediens(sök, produkt_db, namn, "")
+            with cache_lås:
+                match_cache[nyckel] = bas
+        ing = dict(bas)
+        ing["mangd"] = mangd
+        return ing
+
+    def _berika_rätt(rätt: dict | None) -> dict | None:
         if not rätt:
-            continue
-        t_s0 = time.perf_counter()
+            return None
         ingredienser = [
-            _matcha_ingrediens(sök, produkt_db, i.get("namn", ""), i.get("mangd", ""))
+            _matcha(i.get("namn", ""), i.get("mangd", ""))
             for i in rätt.get("ingredienser", [])
         ]
-        t_sök += time.perf_counter() - t_s0
-
         total = ordinarie = 0.0
         for ing in ingredienser:
             ord_pris = _flyt(ing.get("pris"))
@@ -238,15 +251,13 @@ def foresla_matratter(meddelande: str, karta: str = "hela_butiken") -> dict:
             if ord_pris is not None:
                 ordinarie += ord_pris
 
-        # Riktigt matfoto (Pexels) med rättnamn → huvudingrediens som fallback,
-        # och produktbilden som sista utväg.
+        # Riktigt matfoto (Pexels) — IO, körs parallellt med andra rätters sök.
         bild = (
             hämta_matbild(rätt.get("namn") or "")
             or hämta_matbild(rätt.get("huvudingrediens") or "")
             or _välj_bild(ingredienser, rätt.get("huvudingrediens"))
         )
-
-        matratter.append({
+        return {
             "namn":         rätt.get("namn"),
             "beskrivning":  rätt.get("beskrivning"),
             "portioner":    rätt.get("portioner"),
@@ -256,9 +267,16 @@ def foresla_matratter(meddelande: str, karta: str = "hela_butiken") -> dict:
             "ordinarie_pris": round(ordinarie, 2),
             "besparing":    round(ordinarie - total, 2),
             "ingredienser": ingredienser,
-        })
+        }
+
+    # Berika rätterna parallellt: Pexels-IO för en rätt göms under sök-CPU för en annan.
+    t_berika0 = time.perf_counter()
+    with ThreadPoolExecutor(max_workers=max(len(råa_rätter), 1)) as pool:
+        berikade = list(pool.map(_berika_rätt, råa_rätter))
+    matratter = [m for m in berikade if m]
+    t_berika = time.perf_counter() - t_berika0
 
     print(f"⏱️  matratter: total={time.perf_counter()-t0:.1f}s "
-          f"claude={t_claude:.1f}s (parallell {len(TEMAN)}x) sök={t_sök:.1f}s "
-          f"konfig={MODELL} (rätter={len(matratter)})")
+          f"claude={t_claude:.1f}s (parallell {len(TEMAN)}x) "
+          f"berika={t_berika:.1f}s konfig={MODELL} (rätter={len(matratter)})")
     return {"matratter": matratter}
