@@ -169,6 +169,20 @@ def hämta_kategorier(cookies: dict) -> list[dict]:
 
 # Sätts True när vi dumpat råexempel en gång (för --dump-rå).
 _DUMPAT = False
+# Sätts True när vi dumpat ett kampanj-exempel (produkt med extra-nyckel).
+_PROMO_DUMPAT = False
+
+# Standardnycklar på en produkt UTAN kampanj (från rå_exempel.json).
+# En rabatterad produkt bär extra nycklar utöver dessa → då dumpar vi schemat.
+_BASELINE_PRODUKT_NYCKLAR = {
+    "alcohol", "alternatives", "available", "basketLines", "catchweight",
+    "categoryPath", "countryOfOrigin", "iconAttributes", "icons", "image",
+    "imageConfig", "imageIds", "imagePaths", "images", "isInCurrentCatalog",
+    "isInShoppingList", "isNew", "isVerifiedPurchase", "maxQuantityReached",
+    "name", "packSizeDescription", "price", "productId", "quantityInBasket",
+    "retailerFinancingPlanIds", "retailerProductId", "taxCodesDisplayNames",
+    "timeRestricted", "type", "unitPrice",
+}
 
 
 def hämta_produkter(kategori_id: str, kategori_namn: str,
@@ -207,10 +221,26 @@ def hämta_produkter(kategori_id: str, kategori_namn: str,
         if not rå:
             for page in data.get("pages", []):
                 rå.extend(page.get("products", []))
-        # nytt schema: produkter ligger i productGroups[].items / .products
+        # nytt schema: produkter ligger i productGroups[].products[].product
         if not rå:
             for grupp in data.get("productGroups", []):
-                rå.extend(grupp.get("items") or grupp.get("products") or [])
+                for it in grupp.get("products") or grupp.get("items") or []:
+                    rå.append(it.get("product") or it)
+
+    # Kampanj-upptäckt: dumpa första produkt som bär en icke-standardnyckel
+    # (t.ex. promotions/offers/splitPrice) så vi ser veckokampanj-schemat på
+    # en faktiskt rabatterad vara. Standardvaror saknar dessa fält.
+    global _PROMO_DUMPAT
+    if dump_rå and not _PROMO_DUMPAT:
+        for p in rå:
+            extra = set(p.keys()) - _BASELINE_PRODUKT_NYCKLAR
+            if extra:
+                with open("promo_exempel.json", "w", encoding="utf-8") as f:
+                    json.dump({"extra_nycklar": sorted(extra), "produkt": p},
+                              f, ensure_ascii=False, indent=2)
+                _PROMO_DUMPAT = True
+                print(f"   📝 Kampanj-schema dumpat (extra-nycklar: {sorted(extra)})")
+                break
 
     produkter = []
     for prod in rå:
@@ -218,17 +248,30 @@ def hämta_produkter(kategori_id: str, kategori_namn: str,
             namn  = (prod.get("name") or prod.get("title") or "").strip()
             märke = (prod.get("brand") or prod.get("brandName") or "").strip()
 
-            pris_obj   = prod.get("price") or {}
-            pris       = str(pris_obj.get("current") or pris_obj.get("price") or
-                             prod.get("price") or "")
-            enhetspris = str(pris_obj.get("comparison") or "")
+            # Pris: nytt schema {"amount": "21.60", "currency": "SEK"},
+            # äldre fallback {"current": ...}.
+            pris_obj = prod.get("price") or {}
+            pris     = str(pris_obj.get("amount") or pris_obj.get("current") or
+                           pris_obj.get("price") or "")
 
-            bilder   = prod.get("images") or []
+            # Jämförpris: unitPrice = {"price": {"amount": ...}, "unit": "fop.price.per.kg"}
+            up        = prod.get("unitPrice") or {}
+            up_pris   = up.get("price") if isinstance(up.get("price"), dict) else up
+            up_belopp = (up_pris or {}).get("amount") or ""
+            up_enhet  = (up.get("unit") or "").split(".")[-1]   # "fop.price.per.kg" → "kg"
+            enhetspris = f"{up_belopp} kr/{up_enhet}".strip() if up_belopp else \
+                         str(pris_obj.get("comparison") or "")
+
+            bilder   = prod.get("images") or prod.get("imagePaths") or []
             bild_url = ""
             if isinstance(bilder, list) and bilder:
-                bild_url = bilder[0].get("url", "") if isinstance(bilder[0], dict) else str(bilder[0])
+                första = bilder[0]
+                bild_url = (första.get("url") or första.get("path", "")) \
+                    if isinstance(första, dict) else str(första)
             elif isinstance(bilder, str):
                 bild_url = bilder
+            elif isinstance(prod.get("image"), dict):
+                bild_url = prod["image"].get("url", "")
 
             if not namn:
                 continue
