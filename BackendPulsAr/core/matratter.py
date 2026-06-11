@@ -20,7 +20,9 @@ from core.produkt_sok import get_produkt_sök
 from core.produkt_skanning import läs_konsoliderade
 
 client = anthropic.Anthropic()
-MODELL = "claude-sonnet-4-20250514"
+# Haiku räcker gott för JSON-komposition av rätter och är ~2-3x snabbare +
+# billigare än Sonnet. Latensen i detta anrop är nästan helt modellgenerering.
+MODELL = "claude-haiku-4-5-20251001"
 
 
 def _flyt(värde) -> float | None:
@@ -139,7 +141,12 @@ def foresla_matratter(meddelande: str, karta: str = "hela_butiken") -> dict:
     svar = client.messages.create(
         model=MODELL,
         max_tokens=2000,
-        system=SYSTEM_PROMPT,
+        # Cacha den fasta systemprompten → billigare/snabbare upprepade anrop.
+        system=[{
+            "type": "text",
+            "text": SYSTEM_PROMPT,
+            "cache_control": {"type": "ephemeral"},
+        }],
         messages=[{
             "role": "user",
             "content": (
