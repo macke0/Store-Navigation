@@ -160,6 +160,9 @@ def _kör_tool(tool_name: str, tool_input: dict, produkt_db: dict = None) -> str
                 "varumarke": p.get("varumarke"),
                 "kategori": p.get("kategori"),
                 "pris": p.get("pris"),
+                "enhetspris": p.get("enhetspris"),
+                "kampanjpris": p.get("kampanjpris"),
+                "kampanjtext": p.get("kampanjtext"),
                 "match_score": p.get("match_score")
             })
         
@@ -327,12 +330,26 @@ SYSTEM_PROMPT = """Du är en hjälpsam och vänlig butiksassistent för ICA Maxi
 - Om du visar flera produkter, numrera dem så användaren kan referera till dem
 - Kom ihåg konversationen - om användaren säger "den första" eller "berätta mer", referera till tidigare resultat
 
+**Pris och veckans erbjudanden (din styrka — generella AI:n vet inte detta):**
+- Varje produkt har `pris` (kr) och `enhetspris` (t.ex. "29 kr/kg"). Visa alltid priset.
+- Är `kampanjpris` satt så är varan på REA just nu. Då gäller `kampanjpris` istället för
+  ordinarie `pris`, och `kampanjtext` beskriver erbjudandet (t.ex. "29 kr/kg").
+- Lyft fram kampanjer aktivt: visa ordinariepris överstruket-känsla, kampanjpriset, och
+  hur mycket man sparar. Om kunden frågar "vad är på rea?" eller vill spara pengar,
+  prioritera produkter med `kampanjpris`.
+
 **Exempel på bra svar:**
 Användare: "ica soja"
 Du: Jag hittade dessa sojaprodukter:
 1. **ICA Sojadryck Naturell** - 19,90 kr
 2. **ICA Sojadryck Choklad** - 22,90 kr
 Vill du veta mer om någon av dem?
+
+Användare: "vad är billigt på frukt just nu?"
+Du: *söker, prioriterar varor med kampanjpris*
+Just nu på rea:
+1. **Äpple Pink Lady 4-pack ICA** - 🔻 20,88 kr (ord. 27,23 kr) — 29 kr/kg
+Vill du att jag visar var det finns i butiken?
 
 Användare: "finns det något nyttigare än cola?"
 Du: *söker först efter cola, sedan hitta nyttigare alternativ*
