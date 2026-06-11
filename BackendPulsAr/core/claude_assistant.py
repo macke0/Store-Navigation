@@ -26,7 +26,7 @@ client = anthropic.Anthropic()
 
 TOOLS = [
     {
-        "name": "sök_produkter",
+        "name": "sok_produkter",
         "description": """Söker efter produkter i butiken med fuzzy matching. 
 Användaren behöver inte skriva exakt - "ica soja" hittar "ICA Sojadryck Naturell".
 Returnerar en lista med matchande produkter, sorterade efter relevans.
@@ -48,7 +48,7 @@ Använd detta tool när användaren vill hitta en produkt eller frågar vad som 
         }
     },
     {
-        "name": "hämta_produktdetaljer",
+        "name": "hamta_produktdetaljer",
         "description": """Hämtar detaljerad information om en specifik produkt.
 Inkluderar: namn, märke, kategori, pris, näringsvärden, ingredienser etc.
 Använd detta när användaren vill veta mer om en produkt som redan nämnts.""",
@@ -106,7 +106,7 @@ Använd när användaren vill äta nyttigare eller minska socker/fett.""",
         }
     },
     {
-        "name": "hämta_produktposition",
+        "name": "hamta_produktposition",
         "description": """Hämtar var i butiken en produkt finns.
 Returnerar gång och ungefärlig position för navigering.
 Använd när användaren frågar var en produkt finns eller vill navigera dit.""",
@@ -139,7 +139,7 @@ def _kör_tool(tool_name: str, tool_input: dict, produkt_db: dict = None) -> str
     """
     sök = get_produkt_sök()
     
-    if tool_name == "sök_produkter":
+    if tool_name == "sok_produkter":
         resultat = sök.sök(
             query=tool_input["query"],
             limit=tool_input.get("limit", 5)
@@ -168,7 +168,7 @@ def _kör_tool(tool_name: str, tool_input: dict, produkt_db: dict = None) -> str
             "produkter": produkter
         }, ensure_ascii=False, indent=2)
     
-    elif tool_name == "hämta_produktdetaljer":
+    elif tool_name == "hamta_produktdetaljer":
         produkt = sök.hämta(tool_input["produkt_id"])
         
         if not produkt:
@@ -234,7 +234,7 @@ def _kör_tool(tool_name: str, tool_input: dict, produkt_db: dict = None) -> str
             "nyttigare_alternativ": produkter
         }, ensure_ascii=False, indent=2)
     
-    elif tool_name == "hämta_produktposition":
+    elif tool_name == "hamta_produktposition":
         produkt_id = tool_input["produkt_id"]
         
         # Kolla om vi har position i databas
@@ -312,7 +312,7 @@ def _gissa_gång(kategori: str) -> str:
 
 SYSTEM_PROMPT = """Du är en hjälpsam och vänlig butiksassistent för ICA Maxi Bromma. Du hjälper kunder att:
 
-1. **Hitta produkter** - Använd sök_produkter för att hitta varor. Kunder behöver inte skriva exakt rätt.
+1. **Hitta produkter** - Använd sok_produkter för att hitta varor. Kunder behöver inte skriva exakt rätt.
 2. **Få produktinformation** - Berätta om näringsvärden, ingredienser, pris etc.
 3. **Hitta alternativ** - Om något är slut, föreslå liknande produkter.
 4. **Hitta nyttigare alternativ** - Föreslå produkter med mindre socker, fett eller kalorier.
