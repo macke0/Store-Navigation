@@ -91,7 +91,8 @@ def ladda_ner_bild(url: str, produkt_id: str) -> str:
 
 def spara_csv(produkter: list[dict]):
     fält = ["id", "visningsnamn", "varumarke", "kategori",
-            "pris", "enhetspris", "bild_url", "bild_lokal", "taggar"]
+            "pris", "enhetspris", "kampanjpris", "kampanjtext",
+            "bild_url", "bild_lokal", "taggar"]
     ny = not os.path.exists(CSV_FIL)
     with open(CSV_FIL, "a", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fält)
@@ -262,16 +263,26 @@ def hämta_produkter(kategori_id: str, kategori_namn: str,
             enhetspris = f"{up_belopp} kr/{up_enhet}".strip() if up_belopp else \
                          str(pris_obj.get("comparison") or "")
 
-            bilder   = prod.get("images") or prod.get("imagePaths") or []
+            # Kampanj (veckans erbjudande): promoPrice = rabatterat pris,
+            # promotions[0].description = kampanjtext (t.ex. "29 kr/kg").
+            kampanjpris = str((prod.get("promoPrice") or {}).get("amount") or "")
+            promotions  = prod.get("promotions") or []
+            kampanjtext = (promotions[0].get("description") or "").strip() \
+                if promotions and isinstance(promotions[0], dict) else ""
+
+            # Bild: image.src (ren URL) → images[0].src → imagePaths[0]
             bild_url = ""
-            if isinstance(bilder, list) and bilder:
-                första = bilder[0]
-                bild_url = (första.get("url") or första.get("path", "")) \
-                    if isinstance(första, dict) else str(första)
-            elif isinstance(bilder, str):
-                bild_url = bilder
-            elif isinstance(prod.get("image"), dict):
-                bild_url = prod["image"].get("url", "")
+            if isinstance(prod.get("image"), dict):
+                bild_url = prod["image"].get("src", "")
+            if not bild_url:
+                bilder = prod.get("images") or []
+                if isinstance(bilder, list) and bilder and isinstance(bilder[0], dict):
+                    bild_url = bilder[0].get("src", "")
+            if not bild_url:
+                vägar = prod.get("imagePaths") or []
+                if isinstance(vägar, list) and vägar:
+                    bas = str(vägar[0])
+                    bild_url = f"{bas}/300x300.jpg" if "images-v3" in bas else bas
 
             if not namn:
                 continue
@@ -293,6 +304,8 @@ def hämta_produkter(kategori_id: str, kategori_namn: str,
                 "kategori":     lövkategori,
                 "pris":         pris,
                 "enhetspris":   enhetspris,
+                "kampanjpris":  kampanjpris,
+                "kampanjtext":  kampanjtext,
                 "bild_url":     bild_url,
                 "bild_lokal":   "",
                 "taggar":       ",".join(taggar),
