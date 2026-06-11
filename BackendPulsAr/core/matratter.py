@@ -152,11 +152,15 @@ def _matcha_ingrediens(sök, produkt_db: dict, namn: str, mangd: str) -> dict:
 
 # Tre teman → tre PARALLELLA enrätts-anrop i stället för ett långt 3-rätters-anrop.
 # Varje anrop genererar ~1/3 så mycket text och körs samtidigt → väggtiden blir
-# ungefär tiden för ETT anrop i stället för summan. Temana får rätterna att divergera.
+# ungefär tiden för ETT anrop i stället för summan. Temana är medvetet skilda i
+# KÖK och TILLAGNINGSSÄTT så rätterna divergerar tydligt (inte bara "grillad vs
+# stekt + en ingrediens"). Varje anrop ser bara sitt eget tema.
 TEMAN = [
-    "en enkel klassiker",
-    "en snabb och vardaglig variant",
-    "en lite lyxigare variant för helgen",
+    "en klassisk svensk husmanskostvariant, lagad i ugn eller på spis",
+    "en rätt tydligt inspirerad av ett annat kök — t.ex. asiatiskt (wok/curry), "
+    "italienskt (pasta/risotto) eller mexikanskt (tacos/gryta)",
+    "en lite lyxigare helgrätt med ett annat tillagningssätt och andra "
+    "tillbehör än de övriga förslagen",
 ]
 
 
@@ -226,7 +230,7 @@ def foresla_matratter(meddelande: str, karta: str = "hela_butiken") -> dict:
         ing["mangd"] = mangd
         return ing
 
-    def _berika_rätt(rätt: dict | None) -> dict | None:
+    def _berika_rätt(rätt: dict | None, index: int = 0) -> dict | None:
         if not rätt:
             return None
         ingredienser = [
@@ -244,9 +248,10 @@ def foresla_matratter(meddelande: str, karta: str = "hela_butiken") -> dict:
                 ordinarie += ord_pris
 
         # Riktigt matfoto (Pexels) — IO, körs parallellt med andra rätters sök.
+        # `index` ger snarlika rätter olika bild ur samma träfflista.
         bild = (
-            hämta_matbild(rätt.get("namn") or "")
-            or hämta_matbild(rätt.get("huvudingrediens") or "")
+            hämta_matbild(rätt.get("namn") or "", index)
+            or hämta_matbild(rätt.get("huvudingrediens") or "", index)
             or _välj_bild(ingredienser, rätt.get("huvudingrediens"))
         )
         return {
@@ -264,11 +269,11 @@ def foresla_matratter(meddelande: str, karta: str = "hela_butiken") -> dict:
     # Ett pipeline-spår per tema: generera rätten OCH berika den direkt i samma task.
     # Då göms en rätts berika (sök + Pexels) under de andra rätternas Claude-generering
     # → väggtiden blir ~det långsammaste enskilda spåret, inte claude + berika i sekvens.
-    def _pipeline(tema: str) -> dict | None:
-        return _berika_rätt(_generera_rätt(meddelande, kontext, tema))
+    def _pipeline(index: int) -> dict | None:
+        return _berika_rätt(_generera_rätt(meddelande, kontext, TEMAN[index]), index)
 
     with ThreadPoolExecutor(max_workers=len(TEMAN)) as pool:
-        berikade = list(pool.map(_pipeline, TEMAN))
+        berikade = list(pool.map(_pipeline, range(len(TEMAN))))
     matratter = [m for m in berikade if m]
 
     print(f"⏱️  matratter: total={time.perf_counter()-t0:.1f}s "
