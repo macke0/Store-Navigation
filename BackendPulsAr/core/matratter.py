@@ -60,6 +60,7 @@ Returnera JSON enligt exakt detta schema:
       "beskrivning": "1-2 meningar som säljer rätten",
       "portioner": 4,
       "protein_g_per_portion": 38,
+      "huvudingrediens": "kycklingfilé",
       "ingredienser": [
         {"namn": "kycklingfilé", "mangd": "600 g"},
         {"namn": "broccoli", "mangd": "1 st"}
@@ -77,6 +78,9 @@ runt det. Kampanjvaror läggs bara till om de passar.
 - 3-5 maträtter.
 - Ingrediensnamn ska vara enkla sökord (t.ex. "kycklingfilé", "ris", "grädde") så att \
 de går att matcha mot butikens sortiment. Undvik märkesnamn.
+- huvudingrediens: rättens "hjälte" — proteinet/råvaran som bäst representerar rätten \
+på bild (t.ex. "oxfilé", "lax", "kycklingfilé"). Måste vara exakt ett av ingrediensnamnen. \
+Aldrig en pantry-vara som smördeg, mjöl, tomat eller kryddor.
 - protein_g_per_portion är din bästa uppskattning (heltal).
 - Svara alltid på svenska. ENDAST JSON."""
 
@@ -105,6 +109,20 @@ def _välj_bästa(träffar: list[dict]) -> dict:
         if (t.get("match_score") or 0) >= topp - 8 and t.get("kampanjpris"):
             return t
     return bästa
+
+
+def _välj_bild(ingredienser: list[dict], huvudingrediens: str | None) -> str:
+    """
+    Rättens bild = huvudingrediensens produktfoto (oxfilé/lax/kyckling) i stället
+    för första bästa ingrediens (kunde bli smördeg/tomat). Fallback: första
+    ingrediens med bild.
+    """
+    huvud = (huvudingrediens or "").lower().strip()
+    if huvud:
+        for i in ingredienser:
+            if i.get("bild_url") and huvud in (i.get("namn_ingrediens") or "").lower():
+                return i["bild_url"]
+    return next((i.get("bild_url") for i in ingredienser if i.get("bild_url")), "")
 
 
 def _matcha_ingrediens(sök, produkt_db: dict, namn: str, mangd: str) -> dict:
@@ -197,7 +215,7 @@ def foresla_matratter(meddelande: str, karta: str = "hela_butiken") -> dict:
             if ord_pris is not None:
                 ordinarie += ord_pris
 
-        bild = next((i.get("bild_url") for i in ingredienser if i.get("bild_url")), "")
+        bild = _välj_bild(ingredienser, rätt.get("huvudingrediens"))
 
         matratter.append({
             "namn":         rätt.get("namn"),
