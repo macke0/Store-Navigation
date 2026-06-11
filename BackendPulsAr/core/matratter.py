@@ -83,22 +83,20 @@ def _bygg_kampanjkontext(kampanjer: list[dict]) -> str:
     return "\n".join(rader)
 
 
-def _enhetspris_tal(produkt: dict) -> float:
-    """Numeriskt jämförpris ('74.35 kr/kg' → 74.35) för rankning. Saknas → inf."""
-    tal = _flyt((produkt.get("enhetspris") or "").split()[0] if produkt.get("enhetspris") else None)
-    return tal if tal is not None else float("inf")
-
-
 def _välj_bästa(träffar: list[dict]) -> dict:
     """
-    Bland redan relevanta sökträffar: föredra kampanjvara (rättens syfte är
-    besparing), annars lägsta jämförpris. Det rensar bort frystorkade
-    nyhets-/premiumprodukter som annars vinner på ren ordmatchning.
+    Sökträffarna är redan sorterade på namnrelevans (match_score). Lita på
+    den ordningen — pris/kg är en dålig proxy för "rätt vara" (potatismjöl är
+    billigare per kg än potatis). Enda justeringen: bland träffar som är
+    ungefär lika relevanta som bästa, föredra kampanjvara (rättens syfte är
+    besparing).
     """
-    return min(
-        träffar,
-        key=lambda p: (0 if p.get("kampanjpris") else 1, _enhetspris_tal(p)),
-    )
+    bästa = träffar[0]
+    topp = bästa.get("match_score") or 0
+    for t in träffar:
+        if (t.get("match_score") or 0) >= topp - 8 and t.get("kampanjpris"):
+            return t
+    return bästa
 
 
 def _matcha_ingrediens(sök, produkt_db: dict, namn: str, mangd: str) -> dict:
