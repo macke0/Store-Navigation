@@ -18,6 +18,7 @@ import uuid
 from core.claude_assistant import get_session_manager
 from core.produkt_sok import get_produkt_sök
 from core.produkt_skanning import läs_konsoliderade
+from core.matratter import foresla_matratter
 
 chat_router = APIRouter()
 
@@ -62,6 +63,15 @@ class KundAssistentResponse(BaseModel):
     svar: str
     session_id: str
     produkter: list
+
+
+class MaträttRequest(BaseModel):
+    meddelande: str
+    karta: str = "hela_butiken"
+
+
+class MaträttResponse(BaseModel):
+    matratter: list
 
 
 def _extrahera_produkter_ur_historik(historik: list) -> list:
@@ -179,6 +189,22 @@ async def kund_assistent(request: KundAssistentRequest):
             produkter=produkter,
         )
 
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@chat_router.post("/kund/matratter", response_model=MaträttResponse)
+async def kund_matratter(request: MaträttRequest):
+    """
+    Kund-flöde: föreslå maträtter utifrån kundens önskemål. Claude komponerar
+    rätterna; varje ingrediens berikas med riktigt pris, kampanj, bild och
+    kartposition från butikens sortiment, plus total kostnad och besparing.
+
+    Klienten visar maträtterna som bläddringsbara kort med bild, och vid klick
+    ingredienslista som kan läggas i inköpslista.
+    """
+    try:
+        return MaträttResponse(**foresla_matratter(request.meddelande, request.karta))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
