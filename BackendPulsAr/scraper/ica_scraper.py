@@ -184,9 +184,14 @@ def hämta_produkter(kategori_id: str, kategori_namn: str,
     if not data:
         return []
 
-    # Dumpa hela råsvaret en gång så vi kan se ICA:s exakta schema
-    # (productGroups → pris, kampanj/erbjudande, lager) och skriva korrekt extraktion.
-    if dump_rå and not _DUMPAT and isinstance(data, dict):
+    if isinstance(data, dict):
+        print(f"   DEBUG: totalProducts={data.get('totalProducts')} "
+              f"productGroups={len(data.get('productGroups') or [])}")
+
+    # Dumpa hela råsvaret en gång — men bara för en kategori som faktiskt har
+    # produkter — så vi ser ICA:s exakta schema (pris, kampanj/erbjudande, lager).
+    if (dump_rå and not _DUMPAT and isinstance(data, dict)
+            and (data.get("totalProducts") or data.get("productGroups"))):
         with open("rå_exempel.json", "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
         _DUMPAT = True
