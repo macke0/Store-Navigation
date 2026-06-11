@@ -76,7 +76,7 @@ ingredienser som faktiskt hör ihop i en rätt en människa skulle vilja äta. H
 enkel klassisk rätt än en konstig kombination bara för att utnyttja kampanj.
 - Utgå alltid från vad kunden faktiskt frågar efter (t.ex. "oxfilé") och bygg rätten \
 runt det. Kampanjvaror läggs bara till om de passar.
-- Exakt 3 maträtter — inte fler.
+- Föreslå exakt det antal maträtter som meddelandet ber om.
 - Ingrediensnamn ska vara enkla sökord (t.ex. "kycklingfilé", "ris", "grädde") så att \
 de går att matcha mot butikens sortiment. Undvik märkesnamn.
 - huvudingrediens: rättens "hjälte" — proteinet/råvaran som bäst representerar rätten \
@@ -150,9 +150,52 @@ def _matcha_ingrediens(sök, produkt_db: dict, namn: str, mangd: str) -> dict:
     }
 
 
+# Tre teman → tre PARALLELLA enrätts-anrop i stället för ett långt 3-rätters-anrop.
+# Varje anrop genererar ~1/3 så mycket text och körs samtidigt → väggtiden blir
+# ungefär tiden för ETT anrop i stället för summan. Temana får rätterna att divergera.
+TEMAN = [
+    "en enkel klassiker",
+    "en snabb och vardaglig variant",
+    "en lite lyxigare variant för helgen",
+]
+
+
+def _generera_rätt(meddelande: str, kontext: str, tema: str) -> dict | None:
+    """Ett Claude-anrop → exakt en rätt (rå dict från modellen) eller None."""
+    svar = client.messages.create(
+        model=MODELL,
+        max_tokens=700,
+        system=[{
+            "type": "text",
+            "text": SYSTEM_PROMPT,
+            "cache_control": {"type": "ephemeral"},
+        }],
+        messages=[{
+            "role": "user",
+            "content": (
+                f"Kundens önskemål: {meddelande}\n\n"
+                f"Varor på kampanj just nu:\n{kontext}\n\n"
+                f"Föreslå EXAKT 1 maträtt — {tema}. Svara som JSON enligt schemat "
+                "(matratter-listan med precis ett objekt)."
+            ),
+        }],
+    )
+    text = "".join(b.text for b in svar.content if b.type == "text").strip()
+    if text.startswith("```"):
+        text = text.strip("`")
+        text = text[text.find("{"):]
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    rätter = data.get("matratter") or []
+    return rätter[0] if rätter else None
+
+
 def foresla_matratter(meddelande: str, karta: str = "hela_butiken") -> dict:
     """Returnera {matratter: [...]} berikade med riktiga priser och besparing."""
     import time
+    from concurrent.futures import ThreadPoolExecutor
     t0 = time.perf_counter()
     sök = get_produkt_sök()
 
@@ -166,39 +209,18 @@ def foresla_matratter(meddelande: str, karta: str = "hela_butiken") -> dict:
     kontext = _bygg_kampanjkontext(kampanjer)
 
     t_claude0 = time.perf_counter()
-    svar = client.messages.create(
-        model=MODELL,
-        max_tokens=1200,
-        # Cacha den fasta systemprompten → billigare/snabbare upprepade anrop.
-        system=[{
-            "type": "text",
-            "text": SYSTEM_PROMPT,
-            "cache_control": {"type": "ephemeral"},
-        }],
-        messages=[{
-            "role": "user",
-            "content": (
-                f"Kundens önskemål: {meddelande}\n\n"
-                f"Varor på kampanj just nu:\n{kontext}\n\n"
-                "Föreslå maträtter som JSON enligt schemat."
-            ),
-        }],
-    )
+    # Tre parallella enrätts-anrop. Systemprompten är cachad → delas billigt mellan dem.
+    with ThreadPoolExecutor(max_workers=len(TEMAN)) as pool:
+        råa_rätter = list(pool.map(
+            lambda tema: _generera_rätt(meddelande, kontext, tema), TEMAN
+        ))
     t_claude = time.perf_counter() - t_claude0
     t_sök = 0.0
 
-    text = "".join(b.text for b in svar.content if b.type == "text").strip()
-    # Tål ev. ```json-staket.
-    if text.startswith("```"):
-        text = text.strip("`")
-        text = text[text.find("{"):]
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError:
-        return {"matratter": []}
-
     matratter = []
-    for rätt in data.get("matratter", []):
+    for rätt in råa_rätter:
+        if not rätt:
+            continue
         t_s0 = time.perf_counter()
         ingredienser = [
             _matcha_ingrediens(sök, produkt_db, i.get("namn", ""), i.get("mangd", ""))
@@ -237,7 +259,6 @@ def foresla_matratter(meddelande: str, karta: str = "hela_butiken") -> dict:
         })
 
     print(f"⏱️  matratter: total={time.perf_counter()-t0:.1f}s "
-          f"claude={t_claude:.1f}s sök={t_sök:.1f}s "
-          f"modell={getattr(svar, 'model', '?')} konfig={MODELL} "
-          f"(rätter={len(matratter)})")
+          f"claude={t_claude:.1f}s (parallell {len(TEMAN)}x) sök={t_sök:.1f}s "
+          f"konfig={MODELL} (rätter={len(matratter)})")
     return {"matratter": matratter}
