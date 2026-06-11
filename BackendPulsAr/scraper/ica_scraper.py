@@ -184,6 +184,14 @@ def hämta_produkter(kategori_id: str, kategori_namn: str,
     if not data:
         return []
 
+    # Dumpa hela råsvaret en gång så vi kan se ICA:s exakta schema
+    # (productGroups → pris, kampanj/erbjudande, lager) och skriva korrekt extraktion.
+    if dump_rå and not _DUMPAT and isinstance(data, dict):
+        with open("rå_exempel.json", "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        _DUMPAT = True
+        print("   📝 Dumpade hela råsvaret till rå_exempel.json")
+
     # Extrahera produkter ur API-svaret
     rå = []
     if isinstance(data, list):
@@ -194,14 +202,10 @@ def hämta_produkter(kategori_id: str, kategori_namn: str,
         if not rå:
             for page in data.get("pages", []):
                 rå.extend(page.get("products", []))
-
-    # Dumpa de första råa produkt-objekten så vi kan se ICA:s exakta
-    # fältnamn (pris, kampanj/erbjudande, lager) och skriva korrekt extraktion.
-    if dump_rå and not _DUMPAT and rå:
-        with open("rå_exempel.json", "w", encoding="utf-8") as f:
-            json.dump(rå[:3], f, ensure_ascii=False, indent=2)
-        _DUMPAT = True
-        print(f"   📝 Dumpade {min(3, len(rå))} råa produkt-objekt till rå_exempel.json")
+        # nytt schema: produkter ligger i productGroups[].items / .products
+        if not rå:
+            for grupp in data.get("productGroups", []):
+                rå.extend(grupp.get("items") or grupp.get("products") or [])
 
     produkter = []
     for prod in rå:
