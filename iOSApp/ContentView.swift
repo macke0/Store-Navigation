@@ -117,6 +117,38 @@ struct ContentView: View {
                         .opacity(animateIn ? 1 : 0)
                         .offset(y: animateIn ? 0 : 20)
 
+                        // Matinspiration-knapp (maträtter med bilder + kampanjer)
+                        NavigationLink(destination: MaträttView()) {
+                            HStack(spacing: 12) {
+                                Image(systemName: "fork.knife")
+                                    .font(.system(size: 16, weight: .bold))
+                                    .foregroundColor(.white)
+
+                                Text("Matinspiration")
+                                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                                    .foregroundColor(.white)
+
+                                Spacer()
+
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 13, weight: .bold))
+                                    .foregroundColor(.white.opacity(0.6))
+                            }
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 16)
+                            .background(
+                                LinearGradient(
+                                    colors: [icaRöd, icaMörkRöd],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            .cornerRadius(14)
+                            .shadow(color: icaRöd.opacity(0.35), radius: 10, y: 4)
+                        }
+                        .opacity(animateIn ? 1 : 0)
+                        .offset(y: animateIn ? 0 : 20)
+
                         // Sök-knapp
                         NavigationLink(destination: SökView()) {
                             HStack(spacing: 12) {

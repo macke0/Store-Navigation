@@ -83,12 +83,30 @@ def _bygg_kampanjkontext(kampanjer: list[dict]) -> str:
     return "\n".join(rader)
 
 
+def _enhetspris_tal(produkt: dict) -> float:
+    """Numeriskt jämförpris ('74.35 kr/kg' → 74.35) för rankning. Saknas → inf."""
+    tal = _flyt((produkt.get("enhetspris") or "").split()[0] if produkt.get("enhetspris") else None)
+    return tal if tal is not None else float("inf")
+
+
+def _välj_bästa(träffar: list[dict]) -> dict:
+    """
+    Bland redan relevanta sökträffar: föredra kampanjvara (rättens syfte är
+    besparing), annars lägsta jämförpris. Det rensar bort frystorkade
+    nyhets-/premiumprodukter som annars vinner på ren ordmatchning.
+    """
+    return min(
+        träffar,
+        key=lambda p: (0 if p.get("kampanjpris") else 1, _enhetspris_tal(p)),
+    )
+
+
 def _matcha_ingrediens(sök, produkt_db: dict, namn: str, mangd: str) -> dict:
-    träffar = sök.sök(namn, 1)
+    träffar = sök.sök(namn, 5)
     if not träffar:
         return {"namn_ingrediens": namn, "mangd": mangd, "matchad": False}
 
-    p = träffar[0]
+    p = _välj_bästa(träffar)
     pos = produkt_db.get(p.get("id")) or {}
     return {
         "produkt_id":   p.get("id"),
