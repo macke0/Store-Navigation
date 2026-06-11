@@ -167,8 +167,14 @@ def hämta_kategorier(cookies: dict) -> list[dict]:
 # PRODUKTER
 # ─────────────────────────────────────────────
 
+# Sätts True när vi dumpat råexempel en gång (för --dump-rå).
+_DUMPAT = False
+
+
 def hämta_produkter(kategori_id: str, kategori_namn: str,
-                    cookies: dict, hämta_bilder: bool) -> list[dict]:
+                    cookies: dict, hämta_bilder: bool,
+                    dump_rå: bool = False) -> list[dict]:
+    global _DUMPAT
     data = api_get("v5/product-pages", {
         "categoryId":    kategori_id,
         "decoratedOnly": "true",
@@ -188,6 +194,14 @@ def hämta_produkter(kategori_id: str, kategori_namn: str,
         if not rå:
             for page in data.get("pages", []):
                 rå.extend(page.get("products", []))
+
+    # Dumpa de första råa produkt-objekten så vi kan se ICA:s exakta
+    # fältnamn (pris, kampanj/erbjudande, lager) och skriva korrekt extraktion.
+    if dump_rå and not _DUMPAT and rå:
+        with open("rå_exempel.json", "w", encoding="utf-8") as f:
+            json.dump(rå[:3], f, ensure_ascii=False, indent=2)
+        _DUMPAT = True
+        print(f"   📝 Dumpade {min(3, len(rå))} råa produkt-objekt till rå_exempel.json")
 
     produkter = []
     for prod in rå:
@@ -247,7 +261,7 @@ def hämta_produkter(kategori_id: str, kategori_namn: str,
 # HUVUDFUNKTION
 # ─────────────────────────────────────────────
 
-def scrapa_ica(max_produkter: int | None, hämta_bilder: bool):
+def scrapa_ica(max_produkter: int | None, hämta_bilder: bool, dump_rå: bool = False):
     cookies = parse_cookies(COOKIE_STRÄNG)
     print(f"🍪 {len(cookies)} cookies laddade\n")
 
@@ -275,7 +289,7 @@ def scrapa_ica(max_produkter: int | None, hämta_bilder: bool):
         if max_produkter and totalt >= max_produkter:
             break
 
-        produkter = hämta_produkter(kat["id"], kat["namn"], cookies, hämta_bilder)
+        produkter = hämta_produkter(kat["id"], kat["namn"], cookies, hämta_bilder, dump_rå)
 
         # Filtrera bort dubletter (samma produkt i flera kategorier)
         nya = [p for p in produkter if p["id"] not in sparade_ids]
@@ -313,9 +327,12 @@ if __name__ == "__main__":
                         help="Max antal produkter (default: alla)")
     parser.add_argument("--ingen-bilder", action="store_true",
                         help="Hoppa över bildnedladdning")
+    parser.add_argument("--dump-rå", dest="dump_rå", action="store_true",
+                        help="Spara de första råa produkt-objekten till rå_exempel.json")
     args = parser.parse_args()
 
     scrapa_ica(
         max_produkter=args.max,
         hämta_bilder=not args.ingen_bilder,
+        dump_rå=args.dump_rå,
     )
