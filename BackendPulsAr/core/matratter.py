@@ -209,14 +209,6 @@ def foresla_matratter(meddelande: str, karta: str = "hela_butiken") -> dict:
     kampanjer = _kampanjprodukter(sök)
     kontext = _bygg_kampanjkontext(kampanjer)
 
-    t_claude0 = time.perf_counter()
-    # Tre parallella enrätts-anrop. Systemprompten är cachad → delas billigt mellan dem.
-    with ThreadPoolExecutor(max_workers=len(TEMAN)) as pool:
-        råa_rätter = list(pool.map(
-            lambda tema: _generera_rätt(meddelande, kontext, tema), TEMAN
-        ))
-    t_claude = time.perf_counter() - t_claude0
-
     # Memoisera ingrediens-sökningar inom requesten — smör/vitlök/salt återkommer
     # mellan rätterna och behöver bara matchas en gång (mangd skiljer sig dock).
     match_cache: dict[str, dict] = {}
@@ -269,14 +261,16 @@ def foresla_matratter(meddelande: str, karta: str = "hela_butiken") -> dict:
             "ingredienser": ingredienser,
         }
 
-    # Berika rätterna parallellt: Pexels-IO för en rätt göms under sök-CPU för en annan.
-    t_berika0 = time.perf_counter()
-    with ThreadPoolExecutor(max_workers=max(len(råa_rätter), 1)) as pool:
-        berikade = list(pool.map(_berika_rätt, råa_rätter))
+    # Ett pipeline-spår per tema: generera rätten OCH berika den direkt i samma task.
+    # Då göms en rätts berika (sök + Pexels) under de andra rätternas Claude-generering
+    # → väggtiden blir ~det långsammaste enskilda spåret, inte claude + berika i sekvens.
+    def _pipeline(tema: str) -> dict | None:
+        return _berika_rätt(_generera_rätt(meddelande, kontext, tema))
+
+    with ThreadPoolExecutor(max_workers=len(TEMAN)) as pool:
+        berikade = list(pool.map(_pipeline, TEMAN))
     matratter = [m for m in berikade if m]
-    t_berika = time.perf_counter() - t_berika0
 
     print(f"⏱️  matratter: total={time.perf_counter()-t0:.1f}s "
-          f"claude={t_claude:.1f}s (parallell {len(TEMAN)}x) "
-          f"berika={t_berika:.1f}s konfig={MODELL} (rätter={len(matratter)})")
+          f"(pipeline {len(TEMAN)}x) konfig={MODELL} (rätter={len(matratter)})")
     return {"matratter": matratter}
