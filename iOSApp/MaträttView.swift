@@ -11,6 +11,7 @@
 //
 
 import SwiftUI
+import Combine
 
 // MARK: - Modeller
 
@@ -178,7 +179,7 @@ final class MaträttService: ObservableObject {
             var req = URLRequest(url: url)
             req.httpMethod = "POST"
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            req.timeoutInterval = 60
+            req.timeoutInterval = 120
             req.httpBody = try JSONEncoder().encode(
                 MaträttRequest(meddelande: rensad, karta: "hela_butiken")
             )
@@ -274,9 +275,11 @@ struct MaträttView: View {
 
     @ViewBuilder
     private var innehåll: some View {
-        if let fel = service.fel, service.matratter.isEmpty {
+        if service.laddar && service.matratter.isEmpty {
+            laddarVy
+        } else if let fel = service.fel, service.matratter.isEmpty {
             meddelande(ikon: "exclamationmark.bubble", text: fel)
-        } else if service.matratter.isEmpty && !service.laddar {
+        } else if service.matratter.isEmpty {
             välkomst
         } else {
             ScrollView {
@@ -288,6 +291,22 @@ struct MaträttView: View {
                 .padding(16)
             }
         }
+    }
+
+    private var laddarVy: some View {
+        VStack(spacing: 16) {
+            Spacer()
+            ProgressView().scaleEffect(1.3).tint(icaRöd)
+            Text("Komponerar maträtter med dagens kampanjer…")
+                .font(.system(size: 15, weight: .semibold, design: .rounded))
+                .foregroundColor(.white.opacity(0.7))
+                .multilineTextAlignment(.center)
+            Text("Det kan ta upp till en minut.")
+                .font(.system(size: 13))
+                .foregroundColor(.white.opacity(0.35))
+            Spacer()
+        }
+        .padding(.horizontal, 40)
     }
 
     private var välkomst: some View {

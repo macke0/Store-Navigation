@@ -125,6 +125,8 @@ def _matcha_ingrediens(sök, produkt_db: dict, namn: str, mangd: str) -> dict:
 
 def foresla_matratter(meddelande: str, karta: str = "hela_butiken") -> dict:
     """Returnera {matratter: [...]} berikade med riktiga priser och besparing."""
+    import time
+    t0 = time.perf_counter()
     sök = get_produkt_sök()
 
     produkt_db = {
@@ -136,6 +138,7 @@ def foresla_matratter(meddelande: str, karta: str = "hela_butiken") -> dict:
     kampanjer = _kampanjprodukter(sök)
     kontext = _bygg_kampanjkontext(kampanjer)
 
+    t_claude0 = time.perf_counter()
     svar = client.messages.create(
         model=MODELL,
         max_tokens=2000,
@@ -149,6 +152,8 @@ def foresla_matratter(meddelande: str, karta: str = "hela_butiken") -> dict:
             ),
         }],
     )
+    t_claude = time.perf_counter() - t_claude0
+    t_sök = 0.0
 
     text = "".join(b.text for b in svar.content if b.type == "text").strip()
     # Tål ev. ```json-staket.
@@ -162,10 +167,12 @@ def foresla_matratter(meddelande: str, karta: str = "hela_butiken") -> dict:
 
     matratter = []
     for rätt in data.get("matratter", []):
+        t_s0 = time.perf_counter()
         ingredienser = [
             _matcha_ingrediens(sök, produkt_db, i.get("namn", ""), i.get("mangd", ""))
             for i in rätt.get("ingredienser", [])
         ]
+        t_sök += time.perf_counter() - t_s0
 
         total = ordinarie = 0.0
         for ing in ingredienser:
@@ -191,4 +198,7 @@ def foresla_matratter(meddelande: str, karta: str = "hela_butiken") -> dict:
             "ingredienser": ingredienser,
         })
 
+    print(f"⏱️  matratter: total={time.perf_counter()-t0:.1f}s "
+          f"claude={t_claude:.1f}s sök={t_sök:.1f}s "
+          f"(rätter={len(matratter)})")
     return {"matratter": matratter}
