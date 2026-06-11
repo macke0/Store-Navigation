@@ -58,7 +58,7 @@ Returnera JSON enligt exakt detta schema:
   "matratter": [
     {
       "namn": "Kort aptitlig titel",
-      "beskrivning": "1-2 meningar som säljer rätten",
+      "beskrivning": "1 kort mening som säljer rätten",
       "portioner": 4,
       "protein_g_per_portion": 38,
       "huvudingrediens": "kycklingfilé",
@@ -76,7 +76,7 @@ ingredienser som faktiskt hör ihop i en rätt en människa skulle vilja äta. H
 enkel klassisk rätt än en konstig kombination bara för att utnyttja kampanj.
 - Utgå alltid från vad kunden faktiskt frågar efter (t.ex. "oxfilé") och bygg rätten \
 runt det. Kampanjvaror läggs bara till om de passar.
-- 3-5 maträtter.
+- Exakt 3 maträtter — inte fler.
 - Ingrediensnamn ska vara enkla sökord (t.ex. "kycklingfilé", "ris", "grädde") så att \
 de går att matcha mot butikens sortiment. Undvik märkesnamn.
 - huvudingrediens: rättens "hjälte" — proteinet/råvaran som bäst representerar rätten \
@@ -168,7 +168,7 @@ def foresla_matratter(meddelande: str, karta: str = "hela_butiken") -> dict:
     t_claude0 = time.perf_counter()
     svar = client.messages.create(
         model=MODELL,
-        max_tokens=2000,
+        max_tokens=1200,
         # Cacha den fasta systemprompten → billigare/snabbare upprepade anrop.
         system=[{
             "type": "text",
