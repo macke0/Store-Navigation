@@ -39,7 +39,9 @@ def hämta_matbild(fråga: str) -> str | None:
     })
     req = urllib.request.Request(
         f"{PEXELS_URL}?{params}",
-        headers={"Authorization": api_nyckel},
+        # Cloudflare framför Pexels blockar urllibs standard-User-Agent
+        # (svarar 403 "error code: 1010"). Skicka en vanlig webbläsar-UA.
+        headers={"Authorization": api_nyckel, "User-Agent": "Mozilla/5.0"},
     )
     try:
         with urllib.request.urlopen(req, timeout=8) as r:
