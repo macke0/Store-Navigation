@@ -69,6 +69,7 @@ class KundAssistentResponse(BaseModel):
 class MaträttRequest(BaseModel):
     meddelande: str
     karta: str = "hela_butiken"
+    portioner: int = 4
 
 
 class MaträttResponse(BaseModel):
@@ -206,11 +207,15 @@ async def kund_matratter(request: MaträttRequest):
     """
     try:
         # Vanliga sökningar serveras direkt ur den veckovisa precachen (med
-        # AI-genererade bilder, noll väntan). Övriga genereras live med Haiku.
-        cachad = hämta_cachad(request.meddelande)
-        if cachad:
-            return MaträttResponse(**cachad)
-        return MaträttResponse(**foresla_matratter(request.meddelande, request.karta))
+        # AI-genererade bilder, noll väntan). Cachen är byggd för standard-
+        # portionsantalet (4) — väljer kunden ett annat antal måste mängderna
+        # skalas om, så då går vi alltid live. Övriga frågor genereras live.
+        if request.portioner == 4:
+            cachad = hämta_cachad(request.meddelande)
+            if cachad:
+                return MaträttResponse(**cachad)
+        return MaträttResponse(**foresla_matratter(
+            request.meddelande, request.karta, request.portioner))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

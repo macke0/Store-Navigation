@@ -65,6 +65,9 @@ Returnera JSON enligt exakt detta schema:
       "beskrivning": "1 kort mening som säljer rätten",
       "portioner": 4,
       "protein_g_per_portion": 38,
+      "kolhydrater_g_per_portion": 55,
+      "fett_g_per_portion": 22,
+      "kcal_per_portion": 620,
       "huvudingrediens": "kycklingfilé",
       "ingredienser": [
         {"namn": "kycklingfilé", "mangd": "600 g"},
@@ -80,13 +83,20 @@ ingredienser som faktiskt hör ihop i en rätt en människa skulle vilja äta. H
 enkel klassisk rätt än en konstig kombination bara för att utnyttja kampanj.
 - Utgå alltid från vad kunden faktiskt frågar efter (t.ex. "oxfilé") och bygg rätten \
 runt det. Kampanjvaror läggs bara till om de passar.
-- Föreslå exakt det antal maträtter som meddelandet ber om.
+- BALANS: om inte kunden uttryckligen ber om något ensidigt (t.ex. "proteinrikt", \
+"lågkolhydrat/LCHF", "extra mycket protein"), ska rätten vara NÄRINGSMÄSSIGT BALANSERAD \
+— en rimlig kombination av protein, bra kolhydrater (potatis/ris/pasta/bröd) och \
+grönsaker. Tvinga inte fram proteinöverskott om kunden inte bett om det; men ett önskemål \
+om t.ex. "proteinrikt" går alltid före balansen.
+- Mängderna i ingredienslistan ska räcka till exakt det antal portioner som anges \
+(skala upp/ner råvarumängderna efter portionsantalet).
 - Ingrediensnamn ska vara enkla sökord (t.ex. "kycklingfilé", "ris", "grädde") så att \
 de går att matcha mot butikens sortiment. Undvik märkesnamn.
 - huvudingrediens: rättens "hjälte" — proteinet/råvaran som bäst representerar rätten \
 på bild (t.ex. "oxfilé", "lax", "kycklingfilé"). Måste vara exakt ett av ingrediensnamnen. \
 Aldrig en pantry-vara som smördeg, mjöl, tomat eller kryddor.
-- protein_g_per_portion är din bästa uppskattning (heltal).
+- protein_g_per_portion, kolhydrater_g_per_portion, fett_g_per_portion och kcal_per_portion \
+är dina bästa näringsuppskattningar PER PORTION (heltal). Fyll alltid i alla fyra.
 - Svara alltid på svenska. ENDAST JSON."""
 
 
@@ -171,7 +181,8 @@ TEMAN = [
 ]
 
 
-def _generera_rätt(meddelande: str, kontext: str, tema: str, model: str = MODELL) -> dict | None:
+def _generera_rätt(meddelande: str, kontext: str, tema: str,
+                   portioner: int = 4, model: str = MODELL) -> dict | None:
     """Ett Claude-anrop → exakt en rätt (rå dict från modellen) eller None."""
     svar = client.messages.create(
         model=model,
@@ -186,8 +197,9 @@ def _generera_rätt(meddelande: str, kontext: str, tema: str, model: str = MODEL
             "content": (
                 f"Kundens önskemål: {meddelande}\n\n"
                 f"Varor på kampanj just nu:\n{kontext}\n\n"
-                f"Föreslå EXAKT 1 maträtt — {tema}. Svara som JSON enligt schemat "
-                "(matratter-listan med precis ett objekt)."
+                f"Föreslå EXAKT 1 maträtt — {tema}. Laga för {portioner} portioner "
+                f'(sätt "portioner": {portioner} och skala ingrediensmängderna därefter). '
+                "Svara som JSON enligt schemat (matratter-listan med precis ett objekt)."
             ),
         }],
     )
@@ -204,12 +216,14 @@ def _generera_rätt(meddelande: str, kontext: str, tema: str, model: str = MODEL
 
 
 def foresla_matratter(meddelande: str, karta: str = "hela_butiken",
-                      model: str = MODELL) -> dict:
+                      portioner: int = 4, model: str = MODELL) -> dict:
     """Returnera {matratter: [...]} berikade med riktiga priser och besparing.
 
-    `model` styr vilken Claude-modell som genererar rätterna (default Haiku —
-    snabbt och billigt, används både live och i precache-batchen).
+    `portioner` styr hur många personer rätterna lagas för (ingrediensmängderna
+    skalas av Claude). `model` styr vilken Claude-modell som genererar rätterna
+    (default Haiku — snabbt och billigt, används både live och i precache-batchen).
     """
+    portioner = max(1, min(int(portioner or 4), 12))
     import time
     import threading
     from concurrent.futures import ThreadPoolExecutor
@@ -277,8 +291,11 @@ def foresla_matratter(meddelande: str, karta: str = "hela_butiken",
         return {
             "namn":         rätt.get("namn"),
             "beskrivning":  rätt.get("beskrivning"),
-            "portioner":    rätt.get("portioner"),
+            "portioner":    rätt.get("portioner") or portioner,
             "protein_g_per_portion": rätt.get("protein_g_per_portion"),
+            "kolhydrater_g_per_portion": rätt.get("kolhydrater_g_per_portion"),
+            "fett_g_per_portion": rätt.get("fett_g_per_portion"),
+            "kcal_per_portion": rätt.get("kcal_per_portion"),
             "bild_url":     bild,
             "total_pris":   round(total, 2),
             "ordinarie_pris": round(ordinarie, 2),
@@ -290,8 +307,9 @@ def foresla_matratter(meddelande: str, karta: str = "hela_butiken",
     # Då göms en rätts berika (sök + Pexels) under de andra rätternas Claude-generering
     # → väggtiden blir ~det långsammaste enskilda spåret, inte claude + berika i sekvens.
     def _pipeline(index: int) -> dict | None:
-        return _berika_rätt(
-            _generera_rätt(meddelande, _kontext_för(index), TEMAN[index], model), index)
+        rätt = _generera_rätt(meddelande, _kontext_för(index), TEMAN[index],
+                              portioner, model)
+        return _berika_rätt(rätt, index)
 
     with ThreadPoolExecutor(max_workers=len(TEMAN)) as pool:
         berikade = list(pool.map(_pipeline, range(len(TEMAN))))
