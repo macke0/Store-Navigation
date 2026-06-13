@@ -14,6 +14,8 @@ Flöde:
 """
 
 import json
+import random
+
 import anthropic
 
 from core.matratt_bilder import hämta_matbild
@@ -51,7 +53,9 @@ kommentarer eller markdown.
 
 Du får en lista över varor som är PÅ KAMPANJ just nu. Kampanjvarorna är en BONUS — \
 använd dem BARA när de naturligt hör hemma i en rätt som ändå passar kundens önskemål. \
-Tvinga ALDRIG in en kampanjvara i en rätt där den inte hör hemma.
+Tvinga ALDRIG in en kampanjvara i en rätt där den inte hör hemma. Om en mindre självklar \
+reavara (inte bara den dyraste/mest uppenbara) passar rätten — lyft gärna den, så kunden \
+upptäcker fler av dagens erbjudanden.
 
 Returnera JSON enligt exakt detta schema:
 {
@@ -157,8 +161,11 @@ def _matcha_ingrediens(sök, produkt_db: dict, namn: str, mangd: str) -> dict:
 # stekt + en ingrediens"). Varje anrop ser bara sitt eget tema.
 TEMAN = [
     "en klassisk svensk husmanskostvariant, lagad i ugn eller på spis",
-    "en rätt tydligt inspirerad av ett annat kök — t.ex. asiatiskt (wok/curry), "
-    "italienskt (pasta/risotto) eller mexikanskt (tacos/gryta)",
+    "en rätt tydligt inspirerad av ett asiatiskt kök — t.ex. wok, curry, "
+    "ramen eller teriyaki",
+    "en rätt från medelhavet/Italien — t.ex. pasta, risotto, ugnsbakat "
+    "eller en gryta",
+    "en snabb vardagsrätt på en panna eller i wok med få ingredienser",
     "en lite lyxigare helgrätt med ett annat tillagningssätt och andra "
     "tillbehör än de övriga förslagen",
 ]
@@ -215,8 +222,16 @@ def foresla_matratter(meddelande: str, karta: str = "hela_butiken",
         if p.get("id")
     }
 
-    kampanjer = _kampanjprodukter(sök)
-    kontext = _bygg_kampanjkontext(kampanjer)
+    # Stor, blandad pool av reavaror. Varje tema får sedan en egen DISJUNKT
+    # skiva (kontext) → rätterna ser OLIKA kampanjvaror och sprids över hela
+    # reasortimentet i stället för att alla konvergera mot samma topp-besparing
+    # (t.ex. fläskytterfilé). Så får kunden upp ögonen för fler nedsatta varor.
+    kampanj_pool = _kampanjprodukter(sök, max_antal=600)
+    random.shuffle(kampanj_pool)
+
+    def _kontext_för(index: int) -> str:
+        skiva = kampanj_pool[index::len(TEMAN)][:40]
+        return _bygg_kampanjkontext(skiva or kampanj_pool[:40])
 
     # Memoisera ingrediens-sökningar inom requesten — smör/vitlök/salt återkommer
     # mellan rätterna och behöver bara matchas en gång (mangd skiljer sig dock).
@@ -275,7 +290,8 @@ def foresla_matratter(meddelande: str, karta: str = "hela_butiken",
     # Då göms en rätts berika (sök + Pexels) under de andra rätternas Claude-generering
     # → väggtiden blir ~det långsammaste enskilda spåret, inte claude + berika i sekvens.
     def _pipeline(index: int) -> dict | None:
-        return _berika_rätt(_generera_rätt(meddelande, kontext, TEMAN[index], model), index)
+        return _berika_rätt(
+            _generera_rätt(meddelande, _kontext_för(index), TEMAN[index], model), index)
 
     with ThreadPoolExecutor(max_workers=len(TEMAN)) as pool:
         berikade = list(pool.map(_pipeline, range(len(TEMAN))))
