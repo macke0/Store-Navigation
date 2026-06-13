@@ -200,9 +200,8 @@ def foresla_matratter(meddelande: str, karta: str = "hela_butiken",
                       model: str = MODELL) -> dict:
     """Returnera {matratter: [...]} berikade med riktiga priser och besparing.
 
-    `model` är Haiku live (snabbt/billigt). Den veckovisa precache-batchen
-    skickar in Opus för bättre, mer varierade rätter — latensen spelar då
-    ingen roll eftersom batchen körs offline.
+    `model` styr vilken Claude-modell som genererar rätterna (default Haiku —
+    snabbt och billigt, används både live och i precache-batchen).
     """
     import time
     import threading
