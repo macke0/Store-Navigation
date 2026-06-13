@@ -164,10 +164,10 @@ TEMAN = [
 ]
 
 
-def _generera_rätt(meddelande: str, kontext: str, tema: str) -> dict | None:
+def _generera_rätt(meddelande: str, kontext: str, tema: str, model: str = MODELL) -> dict | None:
     """Ett Claude-anrop → exakt en rätt (rå dict från modellen) eller None."""
     svar = client.messages.create(
-        model=MODELL,
+        model=model,
         max_tokens=700,
         system=[{
             "type": "text",
@@ -196,8 +196,14 @@ def _generera_rätt(meddelande: str, kontext: str, tema: str) -> dict | None:
     return rätter[0] if rätter else None
 
 
-def foresla_matratter(meddelande: str, karta: str = "hela_butiken") -> dict:
-    """Returnera {matratter: [...]} berikade med riktiga priser och besparing."""
+def foresla_matratter(meddelande: str, karta: str = "hela_butiken",
+                      model: str = MODELL) -> dict:
+    """Returnera {matratter: [...]} berikade med riktiga priser och besparing.
+
+    `model` är Haiku live (snabbt/billigt). Den veckovisa precache-batchen
+    skickar in Opus för bättre, mer varierade rätter — latensen spelar då
+    ingen roll eftersom batchen körs offline.
+    """
     import time
     import threading
     from concurrent.futures import ThreadPoolExecutor
@@ -270,12 +276,12 @@ def foresla_matratter(meddelande: str, karta: str = "hela_butiken") -> dict:
     # Då göms en rätts berika (sök + Pexels) under de andra rätternas Claude-generering
     # → väggtiden blir ~det långsammaste enskilda spåret, inte claude + berika i sekvens.
     def _pipeline(index: int) -> dict | None:
-        return _berika_rätt(_generera_rätt(meddelande, kontext, TEMAN[index]), index)
+        return _berika_rätt(_generera_rätt(meddelande, kontext, TEMAN[index], model), index)
 
     with ThreadPoolExecutor(max_workers=len(TEMAN)) as pool:
         berikade = list(pool.map(_pipeline, range(len(TEMAN))))
     matratter = [m for m in berikade if m]
 
     print(f"⏱️  matratter: total={time.perf_counter()-t0:.1f}s "
-          f"(pipeline {len(TEMAN)}x) konfig={MODELL} (rätter={len(matratter)})")
+          f"(pipeline {len(TEMAN)}x) konfig={model} (rätter={len(matratter)})")
     return {"matratter": matratter}

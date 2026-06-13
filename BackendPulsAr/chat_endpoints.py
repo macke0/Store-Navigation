@@ -19,6 +19,7 @@ from core.claude_assistant import get_session_manager
 from core.produkt_sok import get_produkt_sök
 from core.produkt_skanning import läs_konsoliderade
 from core.matratter import foresla_matratter
+from core.matratt_cache import hämta_cachad
 
 chat_router = APIRouter()
 
@@ -204,6 +205,11 @@ async def kund_matratter(request: MaträttRequest):
     ingredienslista som kan läggas i inköpslista.
     """
     try:
+        # Vanliga sökningar serveras direkt ur den veckovisa precachen (med
+        # AI-genererade bilder, noll väntan). Övriga genereras live med Haiku.
+        cachad = hämta_cachad(request.meddelande)
+        if cachad:
+            return MaträttResponse(**cachad)
         return MaträttResponse(**foresla_matratter(request.meddelande, request.karta))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
