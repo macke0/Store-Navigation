@@ -48,6 +48,10 @@ _KÖTT_FISK = {
     "lamm", "oxfilé", "oxkött", "biff", "entrecote", "ryggbiff", "prosciutto",
     "salami", "chorizo", "lax", "fisk", "torsk", "sej", "räkor", "räka",
     "tonfisk", "skaldjur", "musslor", "kräftor", "sill", "makrill", "abborre",
+    "sardin", "ansjovis", "hummer", "krabba", "scampi", "kaviar", "rom",
+    "bläckfisk", "gädda", "rödspätta", "kolja", "hälleflundra", "öring",
+    "vilt", "rådjur", "älg", "ren", "lever", "blodpudding", "leverpastej",
+    "isterband", "falukorv", "medvurst", "pastrami", "rostbiff", "pancetta",
 }
 _DJUR = _KÖTT_FISK | {
     "ägg", "mjölk", "grädde", "smör", "ost", "yoghurt", "crème", "creme",
@@ -231,8 +235,13 @@ def _matchar_diet(recept: dict, diet: str | None) -> bool:
     if not diet:
         return True
     förbjudna = _DJUR if diet == "veganskt" else _KÖTT_FISK
-    taggar = recept.get("taggar", "")
-    return not any(re.search(rf"\b{re.escape(ord)}", taggar) for ord in förbjudna)
+    # Skanna ingrediensnamnen (mest pålitliga signalen) tillsammans med taggar —
+    # taggar saknar ofta råvaran (t.ex. "sardin"), så enbart taggar släpper
+    # igenom kött/fisk i vegetariska träffar.
+    text = (recept.get("taggar", "") + " " + " ".join(
+        (ing.get("namn") or "") for ing in recept.get("ingredienser", [])
+    )).lower()
+    return not any(re.search(rf"\b{re.escape(ord)}", text) for ord in förbjudna)
 
 
 def _innehåller_alla(recept: dict, ord_lista: list[str]) -> bool:
