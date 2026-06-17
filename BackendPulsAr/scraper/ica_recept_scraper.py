@@ -72,6 +72,10 @@ def _hämta_text(url: str) -> str | None:
         try:
             r = requests.get(url, headers=HEADERS, timeout=TIMEOUT)
             if r.status_code == 200:
+                # ICA:s svar saknar charset i headern → requests gissar ofta
+                # ISO-8859-1 (chardet ej installerat) och manglar å/ä/ö. Allt
+                # är UTF-8, så tvinga det.
+                r.encoding = "utf-8"
                 return r.text
             if r.status_code in (429, 503):
                 time.sleep(2)
@@ -90,9 +94,10 @@ def hämta_recept_urls() -> list[str]:
         return []
 
     barn = re.findall(r"<loc>\s*(.*?)\s*</loc>", index)
-    # Barn-sitemaps är de numrerade (/recept/sitemaps/3), inte indexpages.
-    barn = [b for b in barn if re.search(r"/recept/sitemaps/\d+$", b)]
-    print(f"🗺️  {len(barn)} barn-sitemaps i indexet")
+    # De enskilda receptsidorna ligger i /recept/sitemaps/recipes/N.
+    # /recept/sitemaps/N och /indexpages/N är kategori-/listsidor utan recept-id.
+    barn = [b for b in barn if re.search(r"/recept/sitemaps/recipes/\d+/?$", b)]
+    print(f"🗺️  {len(barn)} recept-sitemaps i indexet")
 
     urls: set[str] = set()
     for i, sm in enumerate(barn, 1):
