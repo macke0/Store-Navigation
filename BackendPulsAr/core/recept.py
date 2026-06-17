@@ -70,6 +70,16 @@ _EJ_MÅLTID = {
     "sås", "majonnäs", "tzatziki", "kryddsmör",
 }
 
+# Många ICA-recept saknar kategori/nyckelord → den enda signalen är NAMNET.
+# Slutar namnet på ett av dessa ord är hela rätten det tillbehöret/efterrätten
+# (t.ex. "Krämig citrondressing", "Vaniljglass"). Curated: INTE "bullar"/"kakor"
+# (köttbullar/fiskkakor är måltider). Gate:as med " med " (komponerad rätt).
+_EJ_MÅLTID_SUFFIX = (
+    "dressing", "sås", "majonnäs", "pesto", "tzatziki", "chutney", "marmelad",
+    "sylt", "tårta", "glass", "dipp", "smoothie", "milkshake", "cocktail",
+    "glögg", "kladdkaka", "cheesecake", "sorbet",
+)
+
 
 # ─────────────────────────────────────────────
 # LADDNING (cacheas i RAM)
@@ -259,12 +269,20 @@ def _matchar_diet(recept: dict, diet: str | None) -> bool:
 
 
 def _är_ej_måltid(recept: dict) -> bool:
-    """True om receptet är efterrätt/bakverk/fika/dryck (utifrån kategorier +
-    nyckelord, INTE ingredienser — annars skulle 'vaniljglass' i en middag
-    flagga den som dessert)."""
+    """True om receptet är efterrätt/bakverk/fika/dryck/tillbehör. Använder
+    kategorier+nyckelord (men INTE ingredienser — annars skulle 'vaniljglass' i
+    en middag flagga den) och, eftersom ICA ofta lämnar kategorin tom, namnets
+    sista ord (en rätt som HETER '...dressing'/'...glass' ÄR tillbehöret)."""
     text = (" ".join(recept.get("kategorier") or []) + " "
             + str(recept.get("nyckelord") or "")).lower()
-    return any(re.search(rf"\b{re.escape(ord)}", text) for ord in _EJ_MÅLTID)
+    if any(re.search(rf"\b{re.escape(ord)}", text) for ord in _EJ_MÅLTID):
+        return True
+    namn = (recept.get("namn") or "").lower()
+    if " med " in namn:        # komponerad rätt, t.ex. "pasta med tomatsås"
+        return False
+    delar = namn.split()
+    sista = delar[-1] if delar else ""
+    return sista.endswith(_EJ_MÅLTID_SUFFIX)
 
 
 def _innehåller_alla(recept: dict, ord_lista: list[str]) -> bool:
