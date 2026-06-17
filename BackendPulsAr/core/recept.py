@@ -58,6 +58,10 @@ _DJUR = _KÖTT_FISK | {
     "ägg", "mjölk", "grädde", "smör", "ost", "yoghurt", "crème", "creme",
     "parmesan", "fetaost", "mozzarella", "honung", "filmjölk", "kvarg", "keso",
 }
+# Fisk/skaldjur ligger ofta INBÄDDADE i sammansättningar (äppelsill,
+# wannameiräkor, gravlax, havskräftor) → \b-prefix missar dem. Dessa stavningar
+# förekommer inte i icke-fisk-ord, så de är säkra att matcha som ren delsträng.
+_INBÄDDAD_FISK = ("sill", "räk", "lax", "torsk", "makrill", "sardin", "kräft")
 
 # Kategori-/nyckelord som visar att receptet INTE är en riktig måltid (sött,
 # fika, dryck, tillbehör/sås). Filtreras bort om kunden inte uttryckligen ber
@@ -284,9 +288,13 @@ def _matchar_diet(recept: dict, diet: str | None) -> bool:
     )).lower()
     if any(re.search(rf"\b{re.escape(ord)}", text) for ord in förbjudna):
         return False
-    # Sammansatt ost (ädelost, getost, prästost) har "ost" som SUFFIX → \bost
-    # missar dem. För veganskt: avvisa även ord som slutar på "ost".
-    if diet == "veganskt" and re.search(r"ost\b", text):
+    # Fisk inbäddad i sammansättning (äppelsill, wannameiräkor) — gäller båda dieter.
+    if any(o in text for o in _INBÄDDAD_FISK):
+        return False
+    # Sammansatt ost (ädelostsallad, getost, prästost) har "ost" inbäddat → \bost
+    # missar dem. För veganskt: avvisa "ost" var som helst UTOM efter "r"
+    # (annars skulle "rostad"/"rostbiff"-grönsaker felaktigt åka ut).
+    if diet == "veganskt" and re.search(r"(?<!r)ost", text):
         return False
     return True
 
