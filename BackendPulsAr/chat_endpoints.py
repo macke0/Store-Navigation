@@ -20,6 +20,7 @@ from core.produkt_sok import get_produkt_sök
 from core.produkt_skanning import läs_konsoliderade
 from core.matratter import foresla_matratter
 from core.matratt_cache import hämta_cachad
+from core.recept import recept_finns, sok_recept
 
 chat_router = APIRouter()
 
@@ -206,10 +207,15 @@ async def kund_matratter(request: MaträttRequest):
     ingredienslista som kan läggas i inköpslista.
     """
     try:
-        # Vanliga sökningar serveras direkt ur den veckovisa precachen (med
-        # AI-genererade bilder, noll väntan). Cachen är byggd för standard-
-        # portionsantalet (4) — väljer kunden ett annat antal måste mängderna
-        # skalas om, så då går vi alltid live. Övriga frågor genereras live.
+        # Finns de skrapade ICA-recepten → sök bland RIKTIGA rätter (riktiga
+        # foton + näringsvärden, rankade på dagens kampanjer). Snabbt: bara en
+        # billig Haiku-frågetolkning, ingen rätt-generering per förslag. iOS
+        # skalar mängderna efter portionsantal lokalt, så portioner skickas inte
+        # in här. Saknas recepten faller vi tillbaka på Claude-genererade rätter.
+        if recept_finns():
+            return MaträttResponse(**sok_recept(request.meddelande, request.karta))
+
+        # Fallback: Claude-genererade rätter (precache för standardportioner).
         if request.portioner == 4:
             cachad = hämta_cachad(request.meddelande)
             if cachad:
