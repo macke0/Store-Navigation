@@ -58,6 +58,16 @@ _DJUR = _KÖTT_FISK | {
     "parmesan", "fetaost", "mozzarella", "honung", "filmjölk", "kvarg", "keso",
 }
 
+# Kategori-/nyckelord som visar att receptet INTE är en riktig måltid (sött,
+# fika, dryck). Filtreras bort om kunden inte uttryckligen ber om en sådan typ
+# (annars rankas snabba efterrätter över middagar på t.ex. "snabbt").
+_EJ_MÅLTID = {
+    "efterrätt", "dessert", "glass", "sorbet", "tårta", "bakelse", "kladdkaka",
+    "cheesecake", "muffins", "cupcake", "godis", "fika", "fikabröd", "kakor",
+    "småkakor", "bulle", "bullar", "drink", "cocktail", "smoothie", "milkshake",
+    "glögg", "sylt", "marmelad",
+}
+
 
 # ─────────────────────────────────────────────
 # LADDNING (cacheas i RAM)
@@ -167,18 +177,20 @@ Schema:
   "diet": null,             // "vegetariskt", "veganskt" eller null
   "sortering": "relevans",  // "billigt" om kunden vill ha billigt/spara/kampanj; "protein" om proteinrikt; "snabbt" om snabbt/få minuter; annars "relevans"
   "max_tid_min": null,      // heltal om kunden anger en tidsgräns, annars null
+  "vill_efterrätt_dryck": false, // true ENDAST om kunden uttryckligen vill ha efterrätt/dessert/bakverk/fika/dryck/drink. Annars false (kunden vill ha vanlig mat/måltid).
   "nyckelord": []           // övriga sökord på svenska, gemener (t.ex. ["middag","gryta"]). Tom om inga.
 }
 
 Exempel:
-"ge mig något billigt" → {"ingredienser_med":[],"diet":null,"sortering":"billigt","max_tid_min":null,"nyckelord":[]}
-"high protein chicken dinner" → {"ingredienser_med":["kyckling"],"diet":null,"sortering":"protein","max_tid_min":null,"nyckelord":["middag"]}
-"vegetariskt på 20 minuter" → {"ingredienser_med":[],"diet":"vegetariskt","sortering":"snabbt","max_tid_min":20,"nyckelord":[]}"""
+"ge mig något billigt" → {"ingredienser_med":[],"diet":null,"sortering":"billigt","max_tid_min":null,"vill_efterrätt_dryck":false,"nyckelord":[]}
+"high protein chicken dinner" → {"ingredienser_med":["kyckling"],"diet":null,"sortering":"protein","max_tid_min":null,"vill_efterrätt_dryck":false,"nyckelord":["middag"]}
+"vegetariskt på 20 minuter" → {"ingredienser_med":[],"diet":"vegetariskt","sortering":"snabbt","max_tid_min":20,"vill_efterrätt_dryck":false,"nyckelord":[]}
+"en god efterrätt" → {"ingredienser_med":[],"diet":null,"sortering":"relevans","max_tid_min":null,"vill_efterrätt_dryck":true,"nyckelord":["efterrätt"]}"""
 
 
 def _parsa_fraga(meddelande: str, model: str = MODELL) -> dict:
     standard = {"ingredienser_med": [], "diet": None, "sortering": "relevans",
-                "max_tid_min": None, "nyckelord": []}
+                "max_tid_min": None, "vill_efterrätt_dryck": False, "nyckelord": []}
     try:
         svar = client.messages.create(
             model=model,
@@ -242,6 +254,15 @@ def _matchar_diet(recept: dict, diet: str | None) -> bool:
         (ing.get("namn") or "") for ing in recept.get("ingredienser", [])
     )).lower()
     return not any(re.search(rf"\b{re.escape(ord)}", text) for ord in förbjudna)
+
+
+def _är_ej_måltid(recept: dict) -> bool:
+    """True om receptet är efterrätt/bakverk/fika/dryck (utifrån kategorier +
+    nyckelord, INTE ingredienser — annars skulle 'vaniljglass' i en middag
+    flagga den som dessert)."""
+    text = (" ".join(recept.get("kategorier") or []) + " "
+            + str(recept.get("nyckelord") or "")).lower()
+    return any(re.search(rf"\b{re.escape(ord)}", text) for ord in _EJ_MÅLTID)
 
 
 def _innehåller_alla(recept: dict, ord_lista: list[str]) -> bool:
@@ -353,10 +374,15 @@ def sok_recept(meddelande: str, karta: str = "hela_butiken",
     med = filt.get("ingredienser_med") or []
     diet = filt.get("diet")
     max_tid = filt.get("max_tid_min")
+    vill_efterrätt = bool(filt.get("vill_efterrätt_dryck"))
 
     scored: list[dict] = []
     for r in recept:
         if med and not _innehåller_alla(r, med):
+            continue
+        # Visa bara riktiga måltider om kunden inte uttryckligen bett om
+        # efterrätt/dryck — annars rankas snabba desserter över middagar.
+        if not vill_efterrätt and _är_ej_måltid(r):
             continue
         if not _matchar_diet(r, diet):
             continue
