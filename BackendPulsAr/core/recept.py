@@ -81,6 +81,11 @@ _EJ_MÅLTID_SUFFIX = (
     "cocktail", "glögg", "kladdkaka", "cheesecake", "sorbet",
 )
 
+# En riktig måltid mättar. Recept med känt lågt energiinnehåll per portion är
+# tilltugg/tillbehör/små sallader (t.ex. grillade pimientos 216 kcal) — filtrera
+# bort dem när kunden vill ha mat (men inte när hen bett om efterrätt).
+_MIN_KCAL_MÅLTID = 250
+
 
 # ─────────────────────────────────────────────
 # LADDNING (cacheas i RAM)
@@ -422,9 +427,13 @@ def sok_recept(meddelande: str, karta: str = "hela_butiken",
         if med and not _innehåller_alla(r, med):
             continue
         # Visa bara riktiga måltider om kunden inte uttryckligen bett om
-        # efterrätt/dryck — annars rankas snabba desserter över middagar.
-        if not vill_efterrätt and _är_ej_måltid(r):
-            continue
+        # efterrätt/dryck — annars rankas snabba desserter/tilltugg över middagar.
+        if not vill_efterrätt:
+            if _är_ej_måltid(r):
+                continue
+            kcal = (r.get("naring") or {}).get("kcal")
+            if kcal is not None and kcal < _MIN_KCAL_MÅLTID:
+                continue
         if not _matchar_diet(r, diet):
             continue
         if max_tid:
