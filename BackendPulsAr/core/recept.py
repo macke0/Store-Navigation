@@ -23,9 +23,11 @@ sparas på ingrediensen i data/ica_recept.json.
 """
 
 import json
+import math
 import os
 import re
 import threading
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 import anthropic
@@ -88,11 +90,26 @@ def recept_finns() -> bool:
 # FÖRMATCHNING (offline)
 # ─────────────────────────────────────────────
 
+def _matcha_namn_chunk(namn_lista: list[str]) -> dict[str, str | None]:
+    """
+    Processpool-arbetare: matcha en grupp unika ingrediensnamn mot sortimentet.
+    Varje process laddar sin egen ProduktSök-singleton (en gång) och kör den
+    GIL-bundna fuzzy-sökningen — så flera kärnor jobbar parallellt.
+    """
+    sök = get_produkt_sök()
+    ut: dict[str, str | None] = {}
+    for namn in namn_lista:
+        träffar = sök.sök(namn, 1)
+        ut[namn] = träffar[0].get("id") if träffar else None
+    return ut
+
+
 def bygg_recept_index() -> int:
     """
     Matcha varje ingrediens i varje recept mot sortimentet EN gång och spara
     produkt_id på ingrediensen. Memoiserar på ingrediensnamn (samma "vetemjöl"
-    återkommer i tusentals recept). Skriver tillbaka till data/ica_recept.json.
+    återkommer i tusentals recept) och parallelliserar den tunga fuzzy-
+    matchningen över processer. Skriver tillbaka till data/ica_recept.json.
     """
     if not DATA_FIL.exists():
         print("❌ data/ica_recept.json saknas — kör scrapern först")
@@ -100,28 +117,35 @@ def bygg_recept_index() -> int:
     with open(DATA_FIL, encoding="utf-8") as f:
         recept = json.load(f)
 
-    sök = get_produkt_sök()
+    # Samla unika ingrediensnamn (gemener, trimmat) — matcha varje EN gång.
+    unika = sorted({
+        nyckel
+        for r in recept
+        for ing in r.get("ingredienser", [])
+        if (nyckel := (ing.get("namn") or "").lower().strip())
+    })
+    print(f"🔎 {len(unika)} unika ingredienser att matcha mot sortimentet")
+
+    # Fuzzy-sökningen är GIL-bunden ren Python → parallellisera över kärnor.
+    arbetare = max(1, os.cpu_count() or 2)
+    storlek = max(1, math.ceil(len(unika) / arbetare))
+    chunkar = [unika[i:i + storlek] for i in range(0, len(unika), storlek)]
     cache: dict[str, str | None] = {}
+    klar = 0
+    with ProcessPoolExecutor(max_workers=arbetare) as pool:
+        for delresultat in pool.map(_matcha_namn_chunk, chunkar):
+            cache.update(delresultat)
+            klar += len(delresultat)
+            print(f"   matchat {klar}/{len(unika)} unika ingredienser")
 
-    def _matcha(namn: str) -> str | None:
-        nyckel = (namn or "").lower().strip()
-        if not nyckel:
-            return None
-        if nyckel not in cache:
-            träffar = sök.sök(nyckel, 1)
-            cache[nyckel] = träffar[0].get("id") if träffar else None
-        return cache[nyckel]
-
-    for i, r in enumerate(recept):
+    for r in recept:
         for ing in r.get("ingredienser", []):
-            ing["produkt_id"] = _matcha(ing.get("namn", ""))
-        if (i + 1) % 1000 == 0:
-            print(f"   indexerat {i+1}/{len(recept)} recept ({len(cache)} unika ingredienser)")
+            ing["produkt_id"] = cache.get((ing.get("namn") or "").lower().strip())
 
     with open(DATA_FIL, "w", encoding="utf-8") as f:
         json.dump(recept, f, ensure_ascii=False)
     ladda_om_recept()
-    print(f"✅ Förmatchade {len(recept)} recept ({len(cache)} unika ingredienser) → {DATA_FIL.name}")
+    print(f"✅ Förmatchade {len(recept)} recept ({len(unika)} unika ingredienser) → {DATA_FIL.name}")
     return len(recept)
 
 
