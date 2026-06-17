@@ -59,13 +59,15 @@ _DJUR = _KÖTT_FISK | {
 }
 
 # Kategori-/nyckelord som visar att receptet INTE är en riktig måltid (sött,
-# fika, dryck). Filtreras bort om kunden inte uttryckligen ber om en sådan typ
-# (annars rankas snabba efterrätter över middagar på t.ex. "snabbt").
+# fika, dryck, tillbehör/sås). Filtreras bort om kunden inte uttryckligen ber
+# om en sådan typ (annars rankas snabba efterrätter/dressingar över middagar).
 _EJ_MÅLTID = {
     "efterrätt", "dessert", "glass", "sorbet", "tårta", "bakelse", "kladdkaka",
     "cheesecake", "muffins", "cupcake", "godis", "fika", "fikabröd", "kakor",
     "småkakor", "bulle", "bullar", "drink", "cocktail", "smoothie", "milkshake",
     "glögg", "sylt", "marmelad",
+    "tillbehör", "dressing", "röra", "dipp", "marinad", "pesto", "chutney",
+    "sås", "majonnäs", "tzatziki", "kryddsmör",
 }
 
 
