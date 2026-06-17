@@ -282,7 +282,13 @@ def _matchar_diet(recept: dict, diet: str | None) -> bool:
     text = (recept.get("taggar", "") + " " + " ".join(
         (ing.get("namn") or "") for ing in recept.get("ingredienser", [])
     )).lower()
-    return not any(re.search(rf"\b{re.escape(ord)}", text) for ord in förbjudna)
+    if any(re.search(rf"\b{re.escape(ord)}", text) for ord in förbjudna):
+        return False
+    # Sammansatt ost (ädelost, getost, prästost) har "ost" som SUFFIX → \bost
+    # missar dem. För veganskt: avvisa även ord som slutar på "ost".
+    if diet == "veganskt" and re.search(r"ost\b", text):
+        return False
+    return True
 
 
 def _är_ej_måltid(recept: dict) -> bool:
@@ -307,7 +313,8 @@ def _innehåller_alla(recept: dict, ord_lista: list[str]) -> bool:
     return all(o.lower() in taggar for o in ord_lista)
 
 
-def _relevans(recept: dict, filt: dict, besparing: float, kampanjer: int) -> float:
+def _relevans(recept: dict, filt: dict, besparing: float, kampanjer: int,
+              mättnadsbonus: bool = True) -> float:
     poäng = 0.0
     taggar = recept.get("taggar", "")
     for o in filt.get("nyckelord", []):
@@ -317,8 +324,9 @@ def _relevans(recept: dict, filt: dict, besparing: float, kampanjer: int) -> flo
     # Populära recept (många betyg) är nästan alltid riktiga middagar, inte
     # småtilltugg → premiera dem så att "matiga" rätter rankas över snacks.
     poäng += min(recept.get("antal_betyg") or 0, 200) * 0.02   # 0..4
-    # Mättande rätt (känt rejält kcal) lyfts över lätta/None-kcal recept.
-    if ((recept.get("naring") or {}).get("kcal") or 0) >= _MÄTTANDE_KCAL:
+    # Mättande rätt (känt rejält kcal) lyfts över lätta/None-kcal recept — men
+    # INTE när kunden bett om efterrätt (då skulle högkalori-middagar smita in).
+    if mättnadsbonus and ((recept.get("naring") or {}).get("kcal") or 0) >= _MÄTTANDE_KCAL:
         poäng += 6
     poäng += min(kampanjer, 5) * 3                  # premiera kampanjtäckning
     poäng += min(besparing, 50) * 0.4
@@ -461,7 +469,8 @@ def sok_recept(meddelande: str, karta: str = "hela_butiken",
         scored.append({
             "recept": r, "total": total, "ordinarie": ordinarie,
             "besparing": besparing,
-            "relevans": _relevans(r, filt, besparing, kampanjer),
+            "relevans": _relevans(r, filt, besparing, kampanjer,
+                                  mättnadsbonus=not vill_efterrätt),
         })
 
     sortering = filt.get("sortering") or "relevans"
