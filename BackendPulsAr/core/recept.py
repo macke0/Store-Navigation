@@ -79,12 +79,23 @@ _EJ_MÅLTID_SUFFIX = (
     "dressing", "sås", "majonnäs", "majo", "pesto", "tzatziki", "chutney",
     "marmelad", "sylt", "tårta", "glass", "dipp", "smoothie", "milkshake",
     "cocktail", "glögg", "kladdkaka", "cheesecake", "sorbet",
+    "drink", "shot", "lemonad", "macka", "smörgås", "toast",
+)
+
+# ICA:s receptkorpus innehåller även icke-mat (skönhets-/DIY-recept). Substr-
+# match på namnet (t.ex. "Apelsindoftande handpeeling") → uteslut alltid.
+_ICKE_MAT = (
+    "peeling", "scrub", "skrubb", "tvål", "badbomb", "schampo", "balsam",
+    "ansiktsmask", "kroppslotion", "handkräm", "deodorant",
 )
 
 # En riktig måltid mättar. Recept med känt lågt energiinnehåll per portion är
 # tilltugg/tillbehör/små sallader (t.ex. grillade pimientos 216 kcal) — filtrera
 # bort dem när kunden vill ha mat (men inte när hen bett om efterrätt).
 _MIN_KCAL_MÅLTID = 250
+# Känt rejält energiinnehåll = nästan säkert en middag → lyft i rankningen så
+# matiga rätter slår lätta recept utan näringsdata (kcal=None passerar golvet).
+_MÄTTANDE_KCAL = 350
 
 
 # ─────────────────────────────────────────────
@@ -306,6 +317,9 @@ def _relevans(recept: dict, filt: dict, besparing: float, kampanjer: int) -> flo
     # Populära recept (många betyg) är nästan alltid riktiga middagar, inte
     # småtilltugg → premiera dem så att "matiga" rätter rankas över snacks.
     poäng += min(recept.get("antal_betyg") or 0, 200) * 0.02   # 0..4
+    # Mättande rätt (känt rejält kcal) lyfts över lätta/None-kcal recept.
+    if ((recept.get("naring") or {}).get("kcal") or 0) >= _MÄTTANDE_KCAL:
+        poäng += 6
     poäng += min(kampanjer, 5) * 3                  # premiera kampanjtäckning
     poäng += min(besparing, 50) * 0.4
     return poäng
@@ -425,6 +439,9 @@ def sok_recept(meddelande: str, karta: str = "hela_butiken",
     scored: list[dict] = []
     for r in recept:
         if med and not _innehåller_alla(r, med):
+            continue
+        # Skönhets-/DIY-recept är inte mat — uteslut alltid.
+        if any(o in (r.get("namn") or "").lower() for o in _ICKE_MAT):
             continue
         # Visa bara riktiga måltider om kunden inte uttryckligen bett om
         # efterrätt/dryck — annars rankas snabba desserter/tilltugg över middagar.
