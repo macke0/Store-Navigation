@@ -76,9 +76,9 @@ _EJ_MÅLTID = {
 # (t.ex. "Krämig citrondressing", "Vaniljglass"). Curated: INTE "bullar"/"kakor"
 # (köttbullar/fiskkakor är måltider). Gate:as med " med " (komponerad rätt).
 _EJ_MÅLTID_SUFFIX = (
-    "dressing", "sås", "majonnäs", "pesto", "tzatziki", "chutney", "marmelad",
-    "sylt", "tårta", "glass", "dipp", "smoothie", "milkshake", "cocktail",
-    "glögg", "kladdkaka", "cheesecake", "sorbet",
+    "dressing", "sås", "majonnäs", "majo", "pesto", "tzatziki", "chutney",
+    "marmelad", "sylt", "tårta", "glass", "dipp", "smoothie", "milkshake",
+    "cocktail", "glögg", "kladdkaka", "cheesecake", "sorbet",
 )
 
 
@@ -298,9 +298,27 @@ def _relevans(recept: dict, filt: dict, besparing: float, kampanjer: int) -> flo
         if o.lower() in taggar:
             poäng += 10
     poäng += (recept.get("betyg") or 0) * 2        # 0..10
+    # Populära recept (många betyg) är nästan alltid riktiga middagar, inte
+    # småtilltugg → premiera dem så att "matiga" rätter rankas över snacks.
+    poäng += min(recept.get("antal_betyg") or 0, 200) * 0.02   # 0..4
     poäng += min(kampanjer, 5) * 3                  # premiera kampanjtäckning
     poäng += min(besparing, 50) * 0.4
     return poäng
+
+
+def _tid_band(recept: dict) -> int:
+    """Grov tidsklass så "snabbt" inte rankar den snabbaste minimaträtten över
+    en strax långsammare men bättre middag. Okänd tid hamnar sist."""
+    t = _tid_min(recept)
+    if t is None:
+        return 9
+    if t <= 20:
+        return 0
+    if t <= 35:
+        return 1
+    if t <= 50:
+        return 2
+    return 3
 
 
 def _sortera(scored: list[dict], sortering: str) -> list[dict]:
@@ -309,7 +327,9 @@ def _sortera(scored: list[dict], sortering: str) -> list[dict]:
     elif sortering == "protein":
         scored.sort(key=lambda s: -(s["recept"]["naring"].get("protein") or 0))
     elif sortering == "snabbt":
-        scored.sort(key=lambda s: (_tid_min(s["recept"]) or 9999, -s["relevans"]))
+        # Tidsband först, men inom samma band vinner relevans (betyg/popularitet)
+        # → en populär 20-min-middag slår en 8-min-dressing.
+        scored.sort(key=lambda s: (_tid_band(s["recept"]), -s["relevans"]))
     else:
         scored.sort(key=lambda s: (-s["relevans"], -s["besparing"]))
     return scored
