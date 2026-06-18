@@ -231,23 +231,21 @@ def recept_finns() -> bool:
 # FÖRMATCHNING (offline)
 # ─────────────────────────────────────────────
 
-def _matcha_namn_chunk(namn_lista: list[str]) -> dict[str, dict | None]:
+def _matcha_namn_chunk(namn_lista: list[str]) -> dict[str, list[dict]]:
     """
     Processpool-arbetare: matcha en grupp unika ingrediensnamn mot sortimentet.
     Varje process laddar sin egen ProduktSök-singleton (en gång) och kör den
     GIL-bundna fuzzy-sökningen — så flera kärnor jobbar parallellt. Returnerar
-    BÅDE produkt-id OCH match_score så att svaga (= troligen fel) träffar kan
-    sållas bort vid sökning.
+    en LISTA med de bästa kandidaterna (id + match_score) per ingrediens, inte
+    bara top-1: så kan sökningen vid körning välja den kandidat som är på KAMPANJ
+    just nu (priserna byts varje vecka, indexet ligger fast). Svaga träffar
+    (< golvet) sållas bort vid sökning, inte här.
     """
     sök = get_produkt_sök()
-    ut: dict[str, dict | None] = {}
+    ut: dict[str, list[dict]] = {}
     for namn in namn_lista:
-        träffar = sök.sök(namn, 1)
-        if träffar:
-            ut[namn] = {"id": träffar[0].get("id"),
-                        "score": träffar[0].get("match_score")}
-        else:
-            ut[namn] = None
+        träffar = sök.sök(namn, 5)
+        ut[namn] = [{"id": t.get("id"), "score": t.get("match_score")} for t in träffar]
     return ut
 
 
@@ -277,7 +275,7 @@ def bygg_recept_index() -> int:
     arbetare = max(1, os.cpu_count() or 2)
     storlek = max(1, math.ceil(len(unika) / arbetare))
     chunkar = [unika[i:i + storlek] for i in range(0, len(unika), storlek)]
-    cache: dict[str, dict | None] = {}
+    cache: dict[str, list[dict]] = {}
     klar = 0
     with ProcessPoolExecutor(max_workers=arbetare) as pool:
         for delresultat in pool.map(_matcha_namn_chunk, chunkar):
@@ -287,9 +285,12 @@ def bygg_recept_index() -> int:
 
     for r in recept:
         for ing in r.get("ingredienser", []):
-            match = cache.get((ing.get("namn") or "").lower().strip())
-            ing["produkt_id"] = match["id"] if match else None
-            ing["match_score"] = match["score"] if match else None
+            kandidater = cache.get((ing.get("namn") or "").lower().strip()) or []
+            # Top-N kandidater så sökningen kan välja kampanjvaran; produkt_id/
+            # match_score = top-1, kvar för bakåtkompatibilitet (äldre konsumenter).
+            ing["produkt_kandidater"] = kandidater
+            ing["produkt_id"] = kandidater[0]["id"] if kandidater else None
+            ing["match_score"] = kandidater[0]["score"] if kandidater else None
 
     with open(DATA_FIL, "w", encoding="utf-8") as f:
         json.dump(recept, f, ensure_ascii=False)
@@ -533,23 +534,61 @@ def _produkt_strider_mot_diet(produkt: dict, diet: str | None) -> bool:
     return False
 
 
+def _giltig_kandidat(p: dict | None, diet: str | None) -> bool:
+    """En kandidatprodukt är användbar om den finns och inte bryter mot dieten."""
+    return bool(p) and not _produkt_strider_mot_diet(p, diet)
+
+
+def _aktuell_besparing(p: dict) -> float:
+    """Hur mycket den här produkten är nedsatt JUST NU (0 om ingen kampanj)."""
+    kampanj = _flyt(p.get("kampanjpris"))
+    if kampanj is None:
+        return 0.0
+    ord_pris = _flyt(p.get("pris"))
+    return max(0.0, ord_pris - kampanj) if ord_pris is not None else 0.0
+
+
 def _matchad_produkt(ing: dict, sök, diet: str | None) -> dict | None:
     """Den produkt en ingrediens ska prissättas/visas med — eller None. Sållar
     bort (a) skafferivaror (olja/salt/peppar), (b) för svaga fuzzy-träffar
     (skräpprodukter, < _MIN_MATCH_SCORE) och (c) produkter som bryter mot dieten.
+    Bland de plausibla kandidaterna väljs den med STÖRST aktuell rabatt — så att
+    veckans nedsatta varor (lammrack, flintastek...) driver fram fynd-rätterna
+    istället för att en icke-nedsatt syskonprodukt låses fast vid indexering.
     En enda grind så att _prissatt och _till_matratt alltid är samstämmiga."""
     if _är_skafferi(ing.get("namn", "")):
         return None
-    ms = ing.get("match_score")
-    if ms is not None and ms < _MIN_MATCH_SCORE:    # äldre index saknar nyckeln → släpp igenom
+
+    kandidater = ing.get("produkt_kandidater")
+    if kandidater is None:
+        # Äldre index utan kandidatlista → fall tillbaka på enskild top-1-träff.
+        ms = ing.get("match_score")
+        if ms is not None and ms < _MIN_MATCH_SCORE:    # äldre index saknar nyckeln → släpp igenom
+            return None
+        pid = ing.get("produkt_id")
+        if not pid:
+            return None
+        p = sök.id_index.get(pid)
+        return p if _giltig_kandidat(p, diet) else None
+
+    # Nytt index: top-N kandidater. Behåll bara de tillräckligt starka och
+    # diet-giltiga; bland dem vinner störst aktuell rabatt, annars bästa namnmatch
+    # (kandidaterna kommer sorterade fallande på match_score från sök).
+    giltiga: list[dict] = []
+    for k in kandidater:
+        ms = k.get("score")
+        if ms is not None and ms < _MIN_MATCH_SCORE:
+            continue
+        p = sök.id_index.get(k.get("id"))
+        if _giltig_kandidat(p, diet):
+            giltiga.append(p)
+    if not giltiga:
         return None
-    pid = ing.get("produkt_id")
-    if not pid:
-        return None
-    p = sök.id_index.get(pid)
-    if not p or _produkt_strider_mot_diet(p, diet):
-        return None
-    return p
+    bäst = giltiga[0]
+    for p in giltiga[1:]:
+        if _aktuell_besparing(p) > _aktuell_besparing(bäst):
+            bäst = p
+    return bäst
 
 
 # Namnmarkörer som visar att en rätt ÄR en växtbaserad variant — då är ett köttord
