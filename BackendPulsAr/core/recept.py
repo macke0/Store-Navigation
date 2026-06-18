@@ -318,13 +318,15 @@ def bygg_recept_index() -> int:
 _DIET_GILTIGA = {"kött", "fisk", "vegetariskt", "veganskt"}
 
 _DIET_TAGG_PROMPT = """Du klassar ICA-recept efter kost. För VARJE recept väljer \
-du EXAKT en kategori utifrån de FAKTISKA ingredienserna (inte rättens namn):
+du EXAKT en kategori utifrån ingredienserna OCH rättens namn:
 - "kött": innehåller kött, fågel, charkuteri eller vilt
 - "fisk": innehåller fisk eller skaldjur men inget kött/fågel
 - "vegetariskt": inget kött/fågel/fisk/skaldjur, men innehåller mejeri och/eller ägg och/eller honung
 - "veganskt": helt fritt från animaliska produkter (inget kött, fisk, mejeri, ägg eller honung)
 
 Regler:
+- Om NAMNET tydligt anger en djurprodukt (t.ex. "fiskgratäng", "äppelsill", "kycklingwok", "köttbullar") räknas den som kött/fisk — ÄVEN om ingredienslistan är kort eller ofullständig.
+- UNDANTAG: när namnet anger en växtbaserad variant ("vegansk kyckling", "vego-bolognese", "växtbaserad färs") är det INTE animaliskt — bedöm efter de växtbaserade ingredienserna.
 - Kött-/fiskbuljong, fisksås, ostronsås, ansjovis, worcestershiresås → kött resp. fisk.
 - Gelatin, ister, löjrom, honung, ägg, smör, grädde, ost, mjölk, yoghurt → animaliskt (ej veganskt; mejeri/ägg/honung utan kött/fisk = vegetariskt).
 - Växtbaserat (havredryck, sojayoghurt, vegansk majonnäs, tofu, vegansk quorn) → räknas inte som animaliskt.
@@ -559,36 +561,57 @@ def _matchad_produkt(ing: dict, sök, diet: str | None) -> dict | None:
     return p
 
 
-def _matchar_diet(recept: dict, diet: str | None) -> bool:
-    if not diet:
-        return True
-    # Förbyggd diet-tagg (Haiku läste hela receptet offline) → lita på den. En
-    # vegansk rätt duger för både veganskt och vegetariskt; en vegetarisk bara
-    # för vegetariskt. Detta ersätter ordliste-whack-a-mole för taggade recept.
-    tagg = recept.get("diet_tagg")
-    if tagg:
-        if diet == "veganskt":
-            return tagg == "veganskt"
-        return tagg in ("vegetariskt", "veganskt")
-    # Fallback för ännu otaggade recept: skanna ordlistorna (skyddsnät).
+# Namnmarkörer som visar att en rätt ÄR en växtbaserad variant — då är ett köttord
+# i namnet bara imitationens namn ("Vegansk kyckling", "Vegobolognese") och
+# ordliste-vetot ska INTE slå till.
+_VEGO_MARKÖRER = ("vegansk", "vegan", "vego", "växtbaserad", "växtbaserat")
+
+
+def _vego_markerad(recept: dict) -> bool:
+    text = ((recept.get("namn") or "") + " " + recept.get("taggar", "")).lower()
+    return any(m in text for m in _VEGO_MARKÖRER)
+
+
+def _ordlista_vetar(recept: dict, diet: str | None) -> bool:
+    """True om recepttexten innehåller ett förbjudet kött/fisk/djur-ord. Skannar
+    ingrediensnamn + taggar (taggar inkluderar rättens NAMN, så 'fiskgratäng' och
+    'äppelsill' fångas där). Pålitligaste signalen; används både som fallback för
+    otaggade recept och som skyddsnät ovanpå LLM-taggen."""
     förbjudna = _DJUR if diet == "veganskt" else _KÖTT_FISK
-    # Skanna ingrediensnamnen (mest pålitliga signalen) tillsammans med taggar —
-    # taggar saknar ofta råvaran (t.ex. "sardin"), så enbart taggar släpper
-    # igenom kött/fisk i vegetariska träffar.
     text = (recept.get("taggar", "") + " " + " ".join(
         (ing.get("namn") or "") for ing in recept.get("ingredienser", [])
     )).lower()
     if any(re.search(rf"\b{re.escape(ord)}", text) for ord in förbjudna):
-        return False
+        return True
     # Fisk inbäddad i sammansättning (äppelsill, wannameiräkor) — gäller båda dieter.
     if any(o in text for o in _INBÄDDAD_FISK):
-        return False
-    # Sammansatt ost (ädelostsallad, getost, prästost) har "ost" inbäddat → \bost
-    # missar dem. För veganskt: avvisa "ost" var som helst UTOM efter "r"
-    # (annars skulle "rostad"/"rostbiff"-grönsaker felaktigt åka ut).
+        return True
+    # Sammansatt ost (ädelostsallad, getost) har "ost" inbäddat → \bost missar dem.
+    # För veganskt: avvisa "ost" var som helst UTOM efter "r" (så "rostad" överlever).
     if diet == "veganskt" and re.search(r"(?<!r)ost", text):
-        return False
-    return True
+        return True
+    return False
+
+
+def _matchar_diet(recept: dict, diet: str | None) -> bool:
+    if not diet:
+        return True
+    # Förbyggd diet-tagg (Haiku läste hela receptet offline) är PRIMÄR — en vegansk
+    # rätt duger för både veganskt och vegetariskt, en vegetarisk bara för
+    # vegetariskt. Men Haiku feltaggar ibland uppenbara fiskrätter (fiskgratäng,
+    # äppelsill) som veg/vegan → kör ordliste-VETO ovanpå som skyddsnät. Undanta
+    # uttalade växtbaserade varianter ("Vegansk kyckling") där köttordet bara är
+    # imitationens namn.
+    tagg = recept.get("diet_tagg")
+    if tagg:
+        tillåten = tagg == "veganskt" if diet == "veganskt" else tagg in ("vegetariskt", "veganskt")
+        if not tillåten:
+            return False
+        if _vego_markerad(recept):
+            return True
+        return not _ordlista_vetar(recept, diet)
+    # Fallback för ännu otaggade recept: ren ordlista (skyddsnät).
+    return not _ordlista_vetar(recept, diet)
 
 
 def _är_ej_måltid(recept: dict) -> bool:
