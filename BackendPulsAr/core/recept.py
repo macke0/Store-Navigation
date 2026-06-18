@@ -266,7 +266,7 @@ Schema:
 {
   "ingredienser_med": [],   // råvaror som MÅSTE ingå (t.ex. ["kyckling"]). Översätt till svenska, gemener.
   "diet": null,             // "vegetariskt", "veganskt" eller null
-  "sortering": "relevans",  // "billigt" om kunden vill ha billigt/spara/kampanj; "protein" om proteinrikt; "snabbt" om snabbt/få minuter; annars "relevans"
+  "sortering": "relevans",  // "kampanj" om kunden vill ha rätter byggda på KAMPANJER/erbjudanden/rabatter/dagens fynd (måltider som blir billigare än vanligt); "billigt" om billigast totalt/spara pengar utan att nämna kampanj; "protein" om proteinrikt; "snabbt" om snabbt/få minuter; annars "relevans"
   "max_tid_min": null,      // heltal om kunden anger en tidsgräns, annars null
   "vill_efterrätt_dryck": false, // true ENDAST om kunden uttryckligen vill ha efterrätt/dessert/bakverk/fika/dryck/drink. Annars false (kunden vill ha vanlig mat/måltid).
   "nyckelord": []           // övriga sökord på svenska, gemener (t.ex. ["middag","gryta"]). Tom om inga.
@@ -275,6 +275,7 @@ Schema:
 Exempel:
 "ge mig något billigt" → {"ingredienser_med":[],"diet":null,"sortering":"billigt","max_tid_min":null,"vill_efterrätt_dryck":false,"nyckelord":[]}
 "high protein chicken dinner" → {"ingredienser_med":["kyckling"],"diet":null,"sortering":"protein","max_tid_min":null,"vill_efterrätt_dryck":false,"nyckelord":["middag"]}
+"maträtter som använder dagens kampanjer" → {"ingredienser_med":[],"diet":null,"sortering":"kampanj","max_tid_min":null,"vill_efterrätt_dryck":false,"nyckelord":[]}
 "vegetariskt på 20 minuter" → {"ingredienser_med":[],"diet":"vegetariskt","sortering":"snabbt","max_tid_min":20,"vill_efterrätt_dryck":false,"nyckelord":[]}
 "en god efterrätt" → {"ingredienser_med":[],"diet":null,"sortering":"relevans","max_tid_min":null,"vill_efterrätt_dryck":true,"nyckelord":["efterrätt"]}"""
 
@@ -311,10 +312,13 @@ def _flyt(värde) -> float | None:
         return None
 
 
-def _prissatt(recept: dict, sök) -> tuple[float, float, float, int]:
-    """(total, ordinarie, besparing, antal_kampanjvaror) från färska priser."""
+def _prissatt(recept: dict, sök) -> tuple[float, float, float, int, int]:
+    """(total, ordinarie, besparing, antal_kampanjvaror, antal_prissatta) från
+    färska priser. antal_prissatta = ingredienser vi kunde sätta pris på, för att
+    kunna räkna ut hur STOR ANDEL av korgen som är på kampanj."""
     total = ordinarie = 0.0
     kampanjer = 0
+    prissatta = 0
     for ing in recept.get("ingredienser", []):
         pid = ing.get("produkt_id")
         if not pid:
@@ -327,11 +331,25 @@ def _prissatt(recept: dict, sök) -> tuple[float, float, float, int]:
         effektivt = kampanj if kampanj is not None else ord_pris
         if effektivt is not None:
             total += effektivt
+            prissatta += 1
         if ord_pris is not None:
             ordinarie += ord_pris
         if kampanj is not None:
             kampanjer += 1
-    return round(total, 2), round(ordinarie, 2), round(ordinarie - total, 2), kampanjer
+    return round(total, 2), round(ordinarie, 2), round(ordinarie - total, 2), kampanjer, prissatta
+
+
+def _kampanjpoäng(besparing: float, ordinarie: float, kampanjer: int,
+                  antal_prissatta: int, total: float) -> float:
+    """Hur bra ett recept KOMBINERAR kampanjvaror till en måltid som blir
+    billigare än vanligt. Belönar (a) stor RELATIV rabatt (billigare än normalt),
+    (b) hög ANDEL av korgen på kampanj (flera kombinerade fynd) och (c) rejäl
+    absolut besparing — och håller samtidigt slutpriset nere."""
+    if ordinarie <= 0:
+        return 0.0
+    relativ = besparing / ordinarie                  # 0..1, "billigare än vanligt"
+    täckning = kampanjer / max(antal_prissatta, 1)    # 0..1, kombinerar flera fynd
+    return (relativ * 60) + (täckning * 25) + min(besparing, 60) * 0.4 - min(total, 250) * 0.03
 
 
 def _matchar_diet(recept: dict, diet: str | None) -> bool:
@@ -421,6 +439,10 @@ def _sortera(scored: list[dict], sortering: str) -> list[dict]:
         # lågt slutpris ska vinna över en dyr rätt som råkar dela EN rabattvara.
         scored.sort(key=lambda s: (
             -(s["besparing"] + min(s["kampanjer"], 5) * 6), s["total"]))
+    elif sortering == "kampanj":
+        # Bäst KOMBINATION av kampanjvaror: störst relativ rabatt + flest fynd i
+        # samma korg → måltider som blir rejält billigare än vanligt.
+        scored.sort(key=lambda s: -s["kampanjpoäng"])
     elif sortering == "protein":
         scored.sort(key=lambda s: -(s["recept"]["naring"].get("protein") or 0))
     elif sortering == "snabbt":
@@ -537,11 +559,13 @@ def sok_recept(meddelande: str, karta: str = "hela_butiken",
             t = _tid_min(r)
             if t and t > max_tid:
                 continue
-        total, ordinarie, besparing, kampanjer = _prissatt(r, sök)
+        total, ordinarie, besparing, kampanjer, prissatta = _prissatt(r, sök)
         scored.append({
             "recept": r, "total": total, "ordinarie": ordinarie,
             "besparing": besparing, "kampanjer": kampanjer,
             "proteinkälla": _proteinkälla(r),
+            "kampanjpoäng": _kampanjpoäng(besparing, ordinarie, kampanjer,
+                                          prissatta, total),
             "relevans": _relevans(r, filt, besparing, kampanjer,
                                   mättnadsbonus=not vill_efterrätt),
         })
@@ -551,6 +575,10 @@ def sok_recept(meddelande: str, karta: str = "hela_butiken",
     # annars skulle oprissatta recept (total=0) felaktigt hamna överst.
     if sortering == "billigt":
         scored = [s for s in scored if s["total"] > 0]
+    # "Kampanj": kunden vill ha rätter BYGGDA på kampanjvaror → kräv minst en
+    # kampanjvara (och ett pris att räkna besparing på).
+    elif sortering == "kampanj":
+        scored = [s for s in scored if s["total"] > 0 and s["kampanjer"] > 0]
 
     _sortera(scored, sortering)
     # Sprid över proteinkällor så toppen inte blir t.ex. bara kyckling — men
