@@ -101,6 +101,11 @@ _MIN_KCAL_MÅLTID = 250
 # matiga rätter slår lätta recept utan näringsdata (kcal=None passerar golvet).
 _MÄTTANDE_KCAL = 350
 
+# I "kampanj"-läget ska rätten vara MÄRKBART billigare än vanligt. En enskild
+# liten rabattvara i en stor korg ger bara nån enstaka procent rabatt — det är
+# ingen "kampanjmåltid". Kräv minst denna relativa rabatt på hela korgen.
+_MIN_KAMPANJANDEL = 0.10
+
 # Huvudproteinkälla per recept — härleds gratis ur namn+ingredienser (ingen LLM).
 # Används för att SPRIDA träffarna: utan den blir t.ex. "billigt" bara kyckling
 # (kyckling är billigt just nu), trots att andra billiga proteiner finns. Ordning
@@ -576,9 +581,14 @@ def sok_recept(meddelande: str, karta: str = "hela_butiken",
     if sortering == "billigt":
         scored = [s for s in scored if s["total"] > 0]
     # "Kampanj": kunden vill ha rätter BYGGDA på kampanjvaror → kräv minst en
-    # kampanjvara (och ett pris att räkna besparing på).
+    # kampanjvara OCH att hela måltiden blir märkbart billigare än vanligt (en
+    # 2%-rabatt är ingen kampanjmåltid).
     elif sortering == "kampanj":
-        scored = [s for s in scored if s["total"] > 0 and s["kampanjer"] > 0]
+        scored = [
+            s for s in scored
+            if s["total"] > 0 and s["kampanjer"] > 0 and s["ordinarie"] > 0
+            and s["besparing"] / s["ordinarie"] >= _MIN_KAMPANJANDEL
+        ]
 
     _sortera(scored, sortering)
     # Sprid över proteinkällor så toppen inte blir t.ex. bara kyckling — men
