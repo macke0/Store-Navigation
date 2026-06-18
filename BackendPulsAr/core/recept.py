@@ -101,6 +101,64 @@ _MIN_KCAL_MÅLTID = 250
 # matiga rätter slår lätta recept utan näringsdata (kcal=None passerar golvet).
 _MÄTTANDE_KCAL = 350
 
+# Huvudproteinkälla per recept — härleds gratis ur namn+ingredienser (ingen LLM).
+# Används för att SPRIDA träffarna: utan den blir t.ex. "billigt" bara kyckling
+# (kyckling är billigt just nu), trots att andra billiga proteiner finns. Ordning
+# = prioritet (mer specifikt först). Fisk/skaldjur matchas som delsträng (de
+# ligger ofta inbäddade: gravlax, wannameiräkor); kötten kräver \b-prefix.
+_PROTEINKÄLLA: list[tuple[str, tuple[str, ...], bool]] = [
+    ("kyckling",    ("kyckling",), False),
+    ("kalkon",      ("kalkon",), False),
+    ("fläsk",       ("fläsk", "bacon", "skinka", "kassler", "karré", "revben", "pancetta"), False),
+    ("nötkött",     ("nöt", "biff", "oxfilé", "oxkött", "entrecote", "ryggbiff", "högrev", "rostbiff", "köttfärs"), False),
+    ("korv",        ("korv", "chorizo", "salami", "isterband", "medvurst"), False),
+    ("lamm",        ("lamm",), False),
+    ("vilt",        ("vilt", "rådjur", "älg", "ren ", "renstek"), False),
+    ("skaldjur",    ("räk", "kräft", "musslor", "hummer", "krabba", "scampi", "skagen", "bläckfisk"), True),
+    ("fisk",        ("lax", "torsk", "fisk", "makrill", "sill", "abborre", "kolja", "öring", "tonfisk", "gädda", "rödspätta", "hälleflundra", "sardin", "ansjovis"), True),
+    ("baljväxt",    ("böna", "bönor", "linser", "lins", "kikärt", "kikärtor", "ärtor"), False),
+    ("vegoprotein", ("tofu", "quorn", "sojafärs", "sojabit", "tempeh", "seitan"), False),
+    ("ägg",         ("ägg",), False),
+    ("ost",         ("halloumi", "fetaost", "paneer"), False),
+]
+
+
+def _proteinkälla(recept: dict) -> str:
+    """Bästa gissning på rättens huvudprotein (för spridning). 'övrigt' om okänt."""
+    text = ((recept.get("namn") or "") + " " + " ".join(
+        (ing.get("namn") or "") for ing in recept.get("ingredienser", [])
+    )).lower()
+    for källa, ord_lista, delsträng in _PROTEINKÄLLA:
+        if delsträng:
+            if any(o in text for o in ord_lista):
+                return källa
+        elif any(re.search(rf"\b{re.escape(o)}", text) for o in ord_lista):
+            return källa
+    return "övrigt"
+
+
+def _diversifiera(scored: list[dict], antal: int, per_källa: int = 2) -> list[dict]:
+    """Plocka topp N men släpp högst `per_källa` rätter med samma proteinkälla
+    förrän alla källor är representerade — fyll sedan på med resten i ordning.
+    Bevarar den underliggande rankningen, ger bara variation i toppen."""
+    ut: list[dict] = []
+    rest: list[dict] = []
+    räknare: dict[str, int] = {}
+    for s in scored:
+        k = s["proteinkälla"]
+        if räknare.get(k, 0) < per_källa:
+            ut.append(s)
+            räknare[k] = räknare.get(k, 0) + 1
+        else:
+            rest.append(s)
+        if len(ut) >= antal:
+            break
+    for s in rest:
+        if len(ut) >= antal:
+            break
+        ut.append(s)
+    return ut[:antal]
+
 
 # ─────────────────────────────────────────────
 # LADDNING (cacheas i RAM)
@@ -358,7 +416,11 @@ def _tid_band(recept: dict) -> int:
 
 def _sortera(scored: list[dict], sortering: str) -> list[dict]:
     if sortering == "billigt":
-        scored.sort(key=lambda s: (-s["besparing"], s["total"]))
+        # Premiera HELA korgens kampanjtäckning, inte bara EN stort rabatterad
+        # vara: en rätt med flera kampanjvaror (eller hög total besparing) och
+        # lågt slutpris ska vinna över en dyr rätt som råkar dela EN rabattvara.
+        scored.sort(key=lambda s: (
+            -(s["besparing"] + min(s["kampanjer"], 5) * 6), s["total"]))
     elif sortering == "protein":
         scored.sort(key=lambda s: -(s["recept"]["naring"].get("protein") or 0))
     elif sortering == "snabbt":
@@ -426,6 +488,8 @@ def _till_matratt(recept: dict, sök, produkt_db: dict,
         "fett_g_per_portion":        näring.get("fett"),
         "kcal_per_portion":          näring.get("kcal"),
         "bild_url":     _bild_url(recept),
+        "betyg":        recept.get("betyg"),
+        "antal_betyg":  recept.get("antal_betyg"),
         "total_pris":   total,
         "ordinarie_pris": ordinarie,
         "besparing":    besparing,
@@ -476,7 +540,8 @@ def sok_recept(meddelande: str, karta: str = "hela_butiken",
         total, ordinarie, besparing, kampanjer = _prissatt(r, sök)
         scored.append({
             "recept": r, "total": total, "ordinarie": ordinarie,
-            "besparing": besparing,
+            "besparing": besparing, "kampanjer": kampanjer,
+            "proteinkälla": _proteinkälla(r),
             "relevans": _relevans(r, filt, besparing, kampanjer,
                                   mättnadsbonus=not vill_efterrätt),
         })
@@ -488,7 +553,9 @@ def sok_recept(meddelande: str, karta: str = "hela_butiken",
         scored = [s for s in scored if s["total"] > 0]
 
     _sortera(scored, sortering)
-    topp = scored[:antal]
+    # Sprid över proteinkällor så toppen inte blir t.ex. bara kyckling — men
+    # bara när kunden INTE krävt en viss råvara (då ska alla träffar ha den).
+    topp = scored[:antal] if med else _diversifiera(scored, antal)
     matratter = [
         _till_matratt(s["recept"], sök, produkt_db,
                       s["total"], s["ordinarie"], s["besparing"])
