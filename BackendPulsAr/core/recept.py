@@ -53,7 +53,8 @@ _KÖTT_FISK = {
     "bläckfisk", "gädda", "rödspätta", "kolja", "hälleflundra", "öring",
     "vilt", "rådjur", "älg", "ren", "lever", "blodpudding", "leverpastej",
     "isterband", "falukorv", "medvurst", "pastrami", "rostbiff", "pancetta",
-    "revben", "revbensspjäll", "blandfärs", "fläskfärs",
+    "revben", "revbensspjäll", "blandfärs", "fläskfärs", "karré", "griskarré",
+    "strömming", "krabb", "hamburgare",
 }
 _DJUR = _KÖTT_FISK | {
     "ägg", "mjölk", "grädde", "smör", "ost", "yoghurt", "crème", "creme",
@@ -629,6 +630,9 @@ def sok_recept(meddelande: str, karta: str = "hela_butiken",
             if t and t > max_tid:
                 continue
         total, ordinarie, besparing, kampanjer, prissatta = _prissatt(r, sök, diet)
+        # Inget matchat = tom inköpslista → värdelös träff i kund-flödet.
+        if prissatta == 0:
+            continue
         scored.append({
             "recept": r, "total": total, "ordinarie": ordinarie,
             "besparing": besparing, "kampanjer": kampanjer,
