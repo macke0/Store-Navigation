@@ -574,11 +574,13 @@ def _vego_markerad(recept: dict) -> bool:
 
 def _ordlista_vetar(recept: dict, diet: str | None) -> bool:
     """True om recepttexten innehåller ett förbjudet kött/fisk/djur-ord. Skannar
-    ingrediensnamn + taggar (taggar inkluderar rättens NAMN, så 'fiskgratäng' och
-    'äppelsill' fångas där). Pålitligaste signalen; används både som fallback för
-    otaggade recept och som skyddsnät ovanpå LLM-taggen."""
+    rättens NAMN + taggar + ingrediensnamn, så 'fiskgratäng' och 'äppelsill' fångas.
+    Pålitligaste signalen; används både som fallback för otaggade recept och som
+    skyddsnät ovanpå LLM-taggen."""
     förbjudna = _DJUR if diet == "veganskt" else _KÖTT_FISK
-    text = (recept.get("taggar", "") + " " + " ".join(
+    # Skannar NAMN + taggar + ingrediensnamn. Namnet tas med EXPLICIT eftersom
+    # taggar inte alltid innehåller rättens namn (t.ex. "Fiskgratäng" slank igenom).
+    text = (recept.get("namn", "") + " " + recept.get("taggar", "") + " " + " ".join(
         (ing.get("namn") or "") for ing in recept.get("ingredienser", [])
     )).lower()
     if any(re.search(rf"\b{re.escape(ord)}", text) for ord in förbjudna):
