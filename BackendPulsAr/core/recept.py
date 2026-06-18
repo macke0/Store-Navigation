@@ -572,7 +572,9 @@ _AVLEDDA_KATEGORIER = (
     # alla nudlar, alla redningar...), inte per produkt. "redning"=Potatismjöl &
     # Redning (potatismjöl för "potatis"), "nudlar"=Äggnudlar (för "ägg"),
     # "marmelad"/"sylt"=Apelsinmarmelad (för "apelsin"), "torkad lök"=Rostad lök.
-    "marmelad", "sylt", "nudlar", "redning", "torkad lök",
+    # "sallad"=Potatissallad/grönsakssallad (beredd rätt, inte råvara; ingrediensen
+    # "sallad"/"sallat" behåller sin produkt via samma ej-i-namnet-skydd).
+    "marmelad", "sylt", "nudlar", "redning", "torkad lök", "sallad",
 )
 
 
