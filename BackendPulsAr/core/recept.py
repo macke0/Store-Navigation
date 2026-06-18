@@ -249,7 +249,10 @@ def _matcha_namn_chunk(namn_lista: list[str]) -> dict[str, list[dict]]:
     sök = get_produkt_sök()
     ut: dict[str, list[dict]] = {}
     for namn in namn_lista:
-        träffar = sök.sök(namn, 5)
+        # Top-12 (inte 5): form-vetot (_är_avledd_form) kan såll bort flera avledda
+        # toppträffar (morot → morotsjuice/-soppa/-kaka...) innan den rena råvaran
+        # ("Morot knippe") dyker upp — den ligger ofta först bortom plats 5.
+        träffar = sök.sök(namn, 12)
         ut[namn] = [{"id": t.get("id"), "score": t.get("match_score")} for t in träffar]
     return ut
 
@@ -539,9 +542,33 @@ def _produkt_strider_mot_diet(produkt: dict, diet: str | None) -> bool:
     return False
 
 
-def _giltig_kandidat(p: dict | None, diet: str | None) -> bool:
-    """En kandidatprodukt är användbar om den finns och inte bryter mot dieten."""
-    return bool(p) and not _produkt_strider_mot_diet(p, diet)
+# Ord som markerar att en produkt är en BEREDD/avledd form, inte råvaran. En
+# råvaru-ingrediens ("morot") fuzzy-matchar tyvärr ofta dessa högre än den rena
+# varan (singular "morot" träffar inte plural "Morötter", men ÄR delsträng i
+# "Morotskaka"/"Morotsjuice"/"Morotssoppa") → en KAKA hamnar i en sallad. Vi
+# vetar bort dem — men BARA när form-ordet saknas i själva ingrediensnamnet, så
+# att recept som faktiskt vill ha den formen ("tomatsås", "morotssoppa") behålls.
+_AVLEDDA_FORMER = (
+    "kaka", "kakor", "tårta", "paj", "bulle", "bullar", "kex", "glass",
+    "sorbet", "godis", "kola", "smoothie", "juice", "saft", "läsk", "nektar",
+    "lemonad", "soppa", "sås", "röra", "puré", "mos", "sallad", "mix",
+    "surkål", "inlagd", "inlagda", "pickles", "chips",
+)
+
+
+def _är_avledd_form(produkt: dict, ing_namn: str) -> bool:
+    """True om produkten är en beredd/avledd form (kaka/juice/soppa/sallad...) av
+    en ingrediens som inte bad om den formen → fel produkt för en råvara."""
+    namn = (produkt.get("namn") or "").lower()
+    ing = (ing_namn or "").lower()
+    return any(f in namn and f not in ing for f in _AVLEDDA_FORMER)
+
+
+def _giltig_kandidat(p: dict | None, diet: str | None, ing_namn: str = "") -> bool:
+    """En kandidatprodukt är användbar om den finns, inte bryter mot dieten och
+    inte är en avledd form (kaka/juice/...) av en råvaru-ingrediens."""
+    return bool(p) and not _produkt_strider_mot_diet(p, diet) \
+        and not _är_avledd_form(p, ing_namn)
 
 
 def _aktuell_besparing(p: dict) -> float:
@@ -574,7 +601,7 @@ def _matchad_produkt(ing: dict, sök, diet: str | None) -> dict | None:
         if not pid:
             return None
         p = sök.id_index.get(pid)
-        return p if _giltig_kandidat(p, diet) else None
+        return p if _giltig_kandidat(p, diet, ing.get("namn", "")) else None
 
     # Nytt index: top-N kandidater. Behåll bara de tillräckligt starka och
     # diet-giltiga (kandidaterna kommer sorterade fallande på match_score från sök).
@@ -584,7 +611,7 @@ def _matchad_produkt(ing: dict, sök, diet: str | None) -> dict | None:
         if ms is not None and ms < _MIN_MATCH_SCORE:
             continue
         p = sök.id_index.get(k.get("id"))
-        if _giltig_kandidat(p, diet):
+        if _giltig_kandidat(p, diet, ing.get("namn", "")):
             giltiga.append((p, ms if ms is not None else 100.0))
     if not giltiga:
         return None
