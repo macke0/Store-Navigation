@@ -53,6 +53,7 @@ _KÖTT_FISK = {
     "bläckfisk", "gädda", "rödspätta", "kolja", "hälleflundra", "öring",
     "vilt", "rådjur", "älg", "ren", "lever", "blodpudding", "leverpastej",
     "isterband", "falukorv", "medvurst", "pastrami", "rostbiff", "pancetta",
+    "revben", "revbensspjäll", "blandfärs", "fläskfärs",
 }
 _DJUR = _KÖTT_FISK | {
     "ägg", "mjölk", "grädde", "smör", "ost", "yoghurt", "crème", "creme",
@@ -61,7 +62,7 @@ _DJUR = _KÖTT_FISK | {
 # Fisk/skaldjur ligger ofta INBÄDDADE i sammansättningar (äppelsill,
 # wannameiräkor, gravlax, havskräftor) → \b-prefix missar dem. Dessa stavningar
 # förekommer inte i icke-fisk-ord, så de är säkra att matcha som ren delsträng.
-_INBÄDDAD_FISK = ("sill", "räk", "lax", "torsk", "makrill", "sardin", "kräft")
+_INBÄDDAD_FISK = ("sill", "räk", "lax", "torsk", "makrill", "sardin", "kräft", "mussl")
 
 # Kategori-/nyckelord som visar att receptet INTE är en riktig måltid (sött,
 # fika, dryck, tillbehör/sås). Filtreras bort om kunden inte uttryckligen ber
@@ -92,6 +93,20 @@ _ICKE_MAT = (
     "peeling", "scrub", "skrubb", "tvål", "badbomb", "schampo", "balsam",
     "ansiktsmask", "kroppslotion", "handkräm", "deodorant",
 )
+
+# Skafferivaror som kunden redan har hemma. Att matcha dem mot sortimentet ger
+# (a) brus i inköpslistan och (b) skräpträffar — "olja" → "Baby Olja" (babyolja!),
+# "peppar" → "Pepparbiff", "salt" → "Salt Himalaya", "vatten" → "Vatten Stilla".
+# Vi prissätter/visar dem därför INTE som produkter (ingrediensen listas ändå).
+_SKAFFERI = {
+    "salt", "flingsalt", "havssalt", "salt och peppar", "salt & peppar",
+    "salt och svartpeppar", "flingsalt och svartpeppar",
+    "peppar", "svartpeppar", "vitpeppar", "grönpeppar",
+    "nymalen svartpeppar", "nymald svartpeppar", "svartpeppar nymald",
+    "vatten", "kallt vatten", "varmt vatten", "ljummet vatten",
+    "socker", "strösocker", "florsocker", "råsocker",
+    "olja", "matolja", "neutral olja", "olja till stekning", "stekolja",
+}
 
 # En riktig måltid mättar. Recept med känt lågt energiinnehåll per portion är
 # tilltugg/tillbehör/små sallader (t.ex. grillade pimientos 216 kcal) — filtrera
@@ -338,6 +353,8 @@ def _prissatt(recept: dict, sök, diet: str | None = None) -> tuple[float, float
     kampanjer = 0
     prissatta = 0
     for ing in recept.get("ingredienser", []):
+        if _är_skafferi(ing.get("namn", "")):
+            continue
         pid = ing.get("produkt_id")
         if not pid:
             continue
@@ -370,6 +387,12 @@ def _kampanjpoäng(besparing: float, ordinarie: float, kampanjer: int,
     relativ = besparing / ordinarie                  # 0..1, "billigare än vanligt"
     täckning = kampanjer / max(antal_prissatta, 1)    # 0..1, kombinerar flera fynd
     return (relativ * 60) + (täckning * 25) + min(besparing, 60) * 0.4 - min(total, 250) * 0.03
+
+
+def _är_skafferi(ing_namn: str) -> bool:
+    """True om ingrediensen är en skafferivara (salt/peppar/vatten/olja/socker)
+    som inte ska matchas mot sortimentet — undviker skräpträffar + listbrus."""
+    return (ing_namn or "").lower().strip() in _SKAFFERI
 
 
 def _produkt_strider_mot_diet(produkt: dict, diet: str | None) -> bool:
@@ -523,8 +546,9 @@ def _till_matratt(recept: dict, sök, produkt_db: dict,
     for ing in recept.get("ingredienser", []):
         pid = ing.get("produkt_id")
         p = sök.id_index.get(pid) if pid else None
-        # Visa inte en köttprodukt som matchats till en veg-ingrediens.
-        if p and _produkt_strider_mot_diet(p, diet):
+        # Visa inte en köttprodukt som matchats till en veg-ingrediens, och inte
+        # skräpträffar för skafferivaror (olja→babyolja, peppar→pepparbiff).
+        if p and (_produkt_strider_mot_diet(p, diet) or _är_skafferi(ing.get("namn", ""))):
             p = None
             pid = None
         pos = produkt_db.get(pid) or {}
