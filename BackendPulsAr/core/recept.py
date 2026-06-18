@@ -566,15 +566,17 @@ def _matchad_produkt(ing: dict, sök, diet: str | None) -> dict | None:
 # ordliste-vetot ska INTE slå till.
 _VEGO_MARKÖRER = ("vegansk", "vegan", "vego", "växtbaserad", "växtbaserat")
 
-
-def _vego_markerad(recept: dict) -> bool:
-    text = ((recept.get("namn") or "") + " " + recept.get("taggar", "")).lower()
-    return any(m in text for m in _VEGO_MARKÖRER)
+# Vego-prefixade FRASER ("växtbaserad ost", "vegansk kyckling", "vegobitar") tas
+# bort INNAN ordliste-vetot skannar, så imitationsprodukter inte triggar kött/-
+# fisk/ost-vetot. En FRISTÅENDE djurprodukt (alaska pollock, fisk i "fiskgratäng")
+# utan vego-prefix står kvar och vetas korrekt. Matchar markören + ev. nästa ord.
+_VEGO_FRAS = re.compile(r"(?:växtbasera\w*|vegansk\w*|vegan|vego)[\s-]*[a-zåäö]*")
 
 
 def _ordlista_vetar(recept: dict, diet: str | None) -> bool:
     """True om recepttexten innehåller ett förbjudet kött/fisk/djur-ord. Skannar
     rättens NAMN + taggar + ingrediensnamn, så 'fiskgratäng' och 'äppelsill' fångas.
+    Vego-prefixade fraser strippas först så imitationer ('vegansk kyckling') överlever.
     Pålitligaste signalen; används både som fallback för otaggade recept och som
     skyddsnät ovanpå LLM-taggen."""
     förbjudna = _DJUR if diet == "veganskt" else _KÖTT_FISK
@@ -583,6 +585,7 @@ def _ordlista_vetar(recept: dict, diet: str | None) -> bool:
     text = (recept.get("namn", "") + " " + recept.get("taggar", "") + " " + " ".join(
         (ing.get("namn") or "") for ing in recept.get("ingredienser", [])
     )).lower()
+    text = _VEGO_FRAS.sub(" ", text)
     if any(re.search(rf"\b{re.escape(ord)}", text) for ord in förbjudna):
         return True
     # Fisk inbäddad i sammansättning (äppelsill, wannameiräkor) — gäller båda dieter.
@@ -601,16 +604,14 @@ def _matchar_diet(recept: dict, diet: str | None) -> bool:
     # Förbyggd diet-tagg (Haiku läste hela receptet offline) är PRIMÄR — en vegansk
     # rätt duger för både veganskt och vegetariskt, en vegetarisk bara för
     # vegetariskt. Men Haiku feltaggar ibland uppenbara fiskrätter (fiskgratäng,
-    # äppelsill) som veg/vegan → kör ordliste-VETO ovanpå som skyddsnät. Undanta
-    # uttalade växtbaserade varianter ("Vegansk kyckling") där köttordet bara är
-    # imitationens namn.
+    # äppelsill) som veg/vegan → kör ordliste-VETO ovanpå som skyddsnät. Vetot
+    # strippar själv vego-prefixade fraser ("Vegansk kyckling") så imitationer
+    # överlever men en fristående fisk/kött-produkt fastnar.
     tagg = recept.get("diet_tagg")
     if tagg:
         tillåten = tagg == "veganskt" if diet == "veganskt" else tagg in ("vegetariskt", "veganskt")
         if not tillåten:
             return False
-        if _vego_markerad(recept):
-            return True
         return not _ordlista_vetar(recept, diet)
     # Fallback för ännu otaggade recept: ren ordlista (skyddsnät).
     return not _ordlista_vetar(recept, diet)
