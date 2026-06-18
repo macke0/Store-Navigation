@@ -170,38 +170,29 @@ def _proteinkälla(recept: dict) -> str:
     return "övrigt"
 
 
-def _diversifiera(scored: list[dict], antal: int, max_per_källa: int = 3) -> list[dict]:
-    """Sprid topplistan över proteinkällor med ROUND-ROBIN: ta bästa återstående
-    rätt ur varje källa varv för varv (källorna i rankordning) så att en enskild
-    källa — t.ex. kyckling när den är billig — inte fyller hela listan. Fyll
-    sedan på med resten om listan blir kort, så att vi alltid returnerar `antal`
-    rätter när de finns. Bevarar rankningen inom varje källa."""
+def _diversifiera(scored: list[dict], antal: int) -> list[dict]:
+    """Sprid topplistan över proteinkällor med REN ROUND-ROBIN (inget tak): ta
+    bästa återstående rätt ur varje källa, varv för varv, tills listan är full.
+    Det begränsar automatiskt varje källa till ~antal/antal_källor — så en enskild
+    källa (t.ex. kyckling när den är billig) inte fyller listan — men använder
+    ALLA källor, så även räkor/nötkött/fisk får plats tidigt om de finns i
+    träfflistan. Varje varv besöks källorna i ordning efter sin bästa återstående
+    rätt (global rankordning) så starka källor kommer tidigt. När en källa tar
+    slut faller den bort (automatisk utfyllnad). Bevarar rankning inom varje källa."""
     grupper: dict[str, list[dict]] = {}
-    for s in scored:                       # behåller rankordning inom varje källa
+    for rang, s in enumerate(scored):      # global rankordning bevaras inom källan
+        s["_rang"] = rang
         grupper.setdefault(s["proteinkälla"], []).append(s)
 
+    köer = [q for q in grupper.values()]
     ut: list[dict] = []
-    vald: set[int] = set()
-    index = {k: 0 for k in grupper}
-    fler = True
-    while len(ut) < antal and fler:
-        fler = False
-        for k in grupper:                  # dict bevarar källornas första-förekomst-ordning
-            if index[k] < min(len(grupper[k]), max_per_källa):
-                s = grupper[k][index[k]]
-                index[k] += 1
-                ut.append(s)
-                vald.add(id(s))
-                fler = True
-                if len(ut) >= antal:
-                    break
-
-    if len(ut) < antal:                    # hellre full lista än strikt tak
-        for s in scored:
-            if id(s) not in vald:
-                ut.append(s)
-                if len(ut) >= antal:
-                    break
+    while len(ut) < antal and köer:
+        köer = [q for q in köer if q]               # släng tomma köer
+        köer.sort(key=lambda q: q[0]["_rang"])      # källa med bästa kvarvarande rätt först
+        for q in köer:
+            ut.append(q.pop(0))
+            if len(ut) >= antal:
+                break
     return ut[:antal]
 
 
@@ -784,7 +775,7 @@ def _till_matratt(recept: dict, sök, produkt_db: dict,
 
 
 def sok_recept(meddelande: str, karta: str = "hela_butiken",
-               antal: int = 12, model: str = MODELL) -> dict:
+               antal: int = 15, model: str = MODELL) -> dict:
     """Sök riktiga ICA-recept → {matratter:[...]} i matratter-format."""
     recept = _ladda_recept()
     if not recept:
