@@ -7,7 +7,6 @@ import cv2
 import numpy as np
 from rapidfuzz import fuzz, utils
 
-# from core.clip_sok import clip_matcha
 from core.qwen import fråga_qwen_vllm
 from core.produktdb import slå_upp_produkt
 

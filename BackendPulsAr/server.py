@@ -45,11 +45,9 @@ from core.feature_karta import bygg_karta
 from core.lokalisering  import lokalisera_kund
 from core.loop_closure import korrigera_loop_closure
 from core.positionering import korrigera_position, beräkna_hyllposition
-#from core.läs_usdz import extrahera_koordinater
 from core.scanner import slug
 from core.qwen import fråga_qwen_vllm
 from core.sok     import sök_router, sätt_databas, smart_sök
-# from core.clip_sok import clip_matcha
 from core.databas  import (spara_produkt as db_spara, hämta_produkt,
                             hämta_alla_produkter, ta_bort_produkt as db_ta_bort,
                             flagga_saknas, hämta_flaggor)
