@@ -568,6 +568,11 @@ _AVLEDDA_KATEGORIER = (
     "chips", "snacks", "riskakor", "energidryck", "sportdryck", "fruktdryck",
     "läsk", "drinkmix", "smaksatt vatten", "barnmat", "barn ", "klämmis",
     "färdig", "fryst enportion", "fryst pizza", "snabbnudlar", "proteinbar",
+    # Avledda produkter med EGEN kategori → fångas generellt (alla marmelader,
+    # alla nudlar, alla redningar...), inte per produkt. "redning"=Potatismjöl &
+    # Redning (potatismjöl för "potatis"), "nudlar"=Äggnudlar (för "ägg"),
+    # "marmelad"/"sylt"=Apelsinmarmelad (för "apelsin"), "torkad lök"=Rostad lök.
+    "marmelad", "sylt", "nudlar", "redning", "torkad lök",
 )
 
 
