@@ -54,7 +54,7 @@ _KÖTT_FISK = {
     "vilt", "rådjur", "älg", "ren", "lever", "blodpudding", "leverpastej",
     "isterband", "falukorv", "medvurst", "pastrami", "rostbiff", "pancetta",
     "revben", "revbensspjäll", "blandfärs", "fläskfärs", "karré", "griskarré",
-    "strömming", "krabb", "hamburgare",
+    "strömming", "krabb", "hamburgare", "bresaola", "serrano", "parmaskinka",
 }
 _DJUR = _KÖTT_FISK | {
     "ägg", "mjölk", "grädde", "smör", "ost", "yoghurt", "crème", "creme",
@@ -419,6 +419,10 @@ def _produkt_strider_mot_diet(produkt: dict, diet: str | None) -> bool:
     if any(o in text for o in _ENGELSK_KÖTT):
         return True
     if diet == "veganskt" and re.search(r"(?<!r)ost", text):
+        return True
+    # Vanlig majonnäs/crème fraiche innehåller ägg/mjölk → ej veganskt. Den vegana
+    # varianten heter explicit "...Vegansk" → släpp bara igenom den.
+    if diet == "veganskt" and "majonnäs" in text and "vegan" not in text:
         return True
     return False
 
