@@ -142,26 +142,38 @@ def _proteinkälla(recept: dict) -> str:
     return "övrigt"
 
 
-def _diversifiera(scored: list[dict], antal: int, per_källa: int = 2) -> list[dict]:
-    """Plocka topp N men släpp högst `per_källa` rätter med samma proteinkälla
-    förrän alla källor är representerade — fyll sedan på med resten i ordning.
-    Bevarar den underliggande rankningen, ger bara variation i toppen."""
+def _diversifiera(scored: list[dict], antal: int, max_per_källa: int = 3) -> list[dict]:
+    """Sprid topplistan över proteinkällor med ROUND-ROBIN: ta bästa återstående
+    rätt ur varje källa varv för varv (källorna i rankordning) så att en enskild
+    källa — t.ex. kyckling när den är billig — inte fyller hela listan. Fyll
+    sedan på med resten om listan blir kort, så att vi alltid returnerar `antal`
+    rätter när de finns. Bevarar rankningen inom varje källa."""
+    grupper: dict[str, list[dict]] = {}
+    for s in scored:                       # behåller rankordning inom varje källa
+        grupper.setdefault(s["proteinkälla"], []).append(s)
+
     ut: list[dict] = []
-    rest: list[dict] = []
-    räknare: dict[str, int] = {}
-    for s in scored:
-        k = s["proteinkälla"]
-        if räknare.get(k, 0) < per_källa:
-            ut.append(s)
-            räknare[k] = räknare.get(k, 0) + 1
-        else:
-            rest.append(s)
-        if len(ut) >= antal:
-            break
-    for s in rest:
-        if len(ut) >= antal:
-            break
-        ut.append(s)
+    vald: set[int] = set()
+    index = {k: 0 for k in grupper}
+    fler = True
+    while len(ut) < antal and fler:
+        fler = False
+        for k in grupper:                  # dict bevarar källornas första-förekomst-ordning
+            if index[k] < min(len(grupper[k]), max_per_källa):
+                s = grupper[k][index[k]]
+                index[k] += 1
+                ut.append(s)
+                vald.add(id(s))
+                fler = True
+                if len(ut) >= antal:
+                    break
+
+    if len(ut) < antal:                    # hellre full lista än strikt tak
+        for s in scored:
+            if id(s) not in vald:
+                ut.append(s)
+                if len(ut) >= antal:
+                    break
     return ut[:antal]
 
 
@@ -317,10 +329,11 @@ def _flyt(värde) -> float | None:
         return None
 
 
-def _prissatt(recept: dict, sök) -> tuple[float, float, float, int, int]:
+def _prissatt(recept: dict, sök, diet: str | None = None) -> tuple[float, float, float, int, int]:
     """(total, ordinarie, besparing, antal_kampanjvaror, antal_prissatta) från
     färska priser. antal_prissatta = ingredienser vi kunde sätta pris på, för att
-    kunna räkna ut hur STOR ANDEL av korgen som är på kampanj."""
+    kunna räkna ut hur STOR ANDEL av korgen som är på kampanj. Produkter som
+    bryter mot dieten räknas INTE (de visas inte heller, se _till_matratt)."""
     total = ordinarie = 0.0
     kampanjer = 0
     prissatta = 0
@@ -330,6 +343,8 @@ def _prissatt(recept: dict, sök) -> tuple[float, float, float, int, int]:
             continue
         p = sök.id_index.get(pid)
         if not p:
+            continue
+        if _produkt_strider_mot_diet(p, diet):
             continue
         ord_pris = _flyt(p.get("pris"))
         kampanj = _flyt(p.get("kampanjpris"))
@@ -355,6 +370,26 @@ def _kampanjpoäng(besparing: float, ordinarie: float, kampanjer: int,
     relativ = besparing / ordinarie                  # 0..1, "billigare än vanligt"
     täckning = kampanjer / max(antal_prissatta, 1)    # 0..1, kombinerar flera fynd
     return (relativ * 60) + (täckning * 25) + min(besparing, 60) * 0.4 - min(total, 250) * 0.03
+
+
+def _produkt_strider_mot_diet(produkt: dict, diet: str | None) -> bool:
+    """True om en MATCHAD produkt bryter mot dieten. Receptets ingrediensnamn kan
+    vara helt vegetariskt ("peppar", "buljong") men fuzzy-matchas till en KÖTT-
+    produkt ("Pepparbiff", "Kycklingbuljong") — _matchar_diet kollar bara
+    receptets text, inte produkten, så köttprodukter slank in i veg-rätter. Här
+    validerar vi själva produkten (namn + kategori) mot samma ordlistor."""
+    if not diet:
+        return False
+    förbjudna = _DJUR if diet == "veganskt" else _KÖTT_FISK
+    text = ((produkt.get("namn") or "") + " "
+            + (produkt.get("kategori") or "")).lower()
+    if any(re.search(rf"\b{re.escape(ord)}", text) for ord in förbjudna):
+        return True
+    if any(o in text for o in _INBÄDDAD_FISK):
+        return True
+    if diet == "veganskt" and re.search(r"(?<!r)ost", text):
+        return True
+    return False
 
 
 def _matchar_diet(recept: dict, diet: str | None) -> bool:
@@ -482,11 +517,16 @@ def _bild_url(recept: dict) -> str:
 
 
 def _till_matratt(recept: dict, sök, produkt_db: dict,
-                  total: float, ordinarie: float, besparing: float) -> dict:
+                  total: float, ordinarie: float, besparing: float,
+                  diet: str | None = None) -> dict:
     ingredienser = []
     for ing in recept.get("ingredienser", []):
         pid = ing.get("produkt_id")
         p = sök.id_index.get(pid) if pid else None
+        # Visa inte en köttprodukt som matchats till en veg-ingrediens.
+        if p and _produkt_strider_mot_diet(p, diet):
+            p = None
+            pid = None
         pos = produkt_db.get(pid) or {}
         mangd = " ".join(filter(None, [ing.get("mangd", ""), ing.get("enhet", "")])).strip() \
             or ing.get("text", "")
@@ -564,7 +604,7 @@ def sok_recept(meddelande: str, karta: str = "hela_butiken",
             t = _tid_min(r)
             if t and t > max_tid:
                 continue
-        total, ordinarie, besparing, kampanjer, prissatta = _prissatt(r, sök)
+        total, ordinarie, besparing, kampanjer, prissatta = _prissatt(r, sök, diet)
         scored.append({
             "recept": r, "total": total, "ordinarie": ordinarie,
             "besparing": besparing, "kampanjer": kampanjer,
@@ -596,7 +636,7 @@ def sok_recept(meddelande: str, karta: str = "hela_butiken",
     topp = scored[:antal] if med else _diversifiera(scored, antal)
     matratter = [
         _till_matratt(s["recept"], sök, produkt_db,
-                      s["total"], s["ordinarie"], s["besparing"])
+                      s["total"], s["ordinarie"], s["besparing"], diet)
         for s in topp
     ]
     return {"matratter": matratter}
