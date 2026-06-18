@@ -134,6 +134,11 @@ _MIN_KAMPANJANDEL = 0.10
 # Recept utan match_score (äldre index) släpps igenom oförändrat.
 _MIN_MATCH_SCORE = 55
 
+# Kampanj-preferensen (välj nedsatt kandidat) får BARA slå till bland kandidater
+# som är nästan lika bra namnmatch som den bästa — inom så här många poäng. Annars
+# vinner en nedsatt MEN sämre match (morot→morotskaka, potatis→potatismjöl).
+_KAMPANJ_MARGINAL = 8
+
 # Huvudproteinkälla per recept — härleds gratis ur namn+ingredienser (ingen LLM).
 # Används för att SPRIDA träffarna: utan den blir t.ex. "billigt" bara kyckling
 # (kyckling är billigt just nu), trots att andra billiga proteiner finns. Ordning
@@ -572,23 +577,29 @@ def _matchad_produkt(ing: dict, sök, diet: str | None) -> dict | None:
         return p if _giltig_kandidat(p, diet) else None
 
     # Nytt index: top-N kandidater. Behåll bara de tillräckligt starka och
-    # diet-giltiga; bland dem vinner störst aktuell rabatt, annars bästa namnmatch
-    # (kandidaterna kommer sorterade fallande på match_score från sök).
-    giltiga: list[dict] = []
+    # diet-giltiga (kandidaterna kommer sorterade fallande på match_score från sök).
+    giltiga: list[tuple[dict, float]] = []
     for k in kandidater:
         ms = k.get("score")
         if ms is not None and ms < _MIN_MATCH_SCORE:
             continue
         p = sök.id_index.get(k.get("id"))
         if _giltig_kandidat(p, diet):
-            giltiga.append(p)
+            giltiga.append((p, ms if ms is not None else 100.0))
     if not giltiga:
         return None
-    bäst = giltiga[0]
-    for p in giltiga[1:]:
-        if _aktuell_besparing(p) > _aktuell_besparing(bäst):
-            bäst = p
-    return bäst
+    # Default = bästa namnmatchen. Kampanj är BARA en tie-break bland kandidater
+    # som är nästan lika bra namnmatch (inom _KAMPANJ_MARGINAL) — annars skulle en
+    # nedsatt men sämre match vinna (morot→morotskaka).
+    bäst_p, bäst_score = giltiga[0]
+    val, val_besp = bäst_p, _aktuell_besparing(bäst_p)
+    for p, score in giltiga[1:]:
+        if score < bäst_score - _KAMPANJ_MARGINAL:
+            break
+        besp = _aktuell_besparing(p)
+        if besp > val_besp:
+            val, val_besp = p, besp
+    return val
 
 
 # Namnmarkörer som visar att en rätt ÄR en växtbaserad variant — då är ett köttord
