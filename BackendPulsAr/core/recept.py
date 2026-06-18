@@ -45,7 +45,7 @@ _BAS_URL = os.environ.get("PUBLIC_BASE_URL", "http://100.84.130.65:8000").rstrip
 _KÖTT_FISK = {
     "kyckling", "fläsk", "fläskfilé", "fläskkarré", "nöt", "nötkött", "kött",
     "köttfärs", "färs", "bacon", "skinka", "korv", "kassler", "kalkon", "anka",
-    "lamm", "oxfilé", "oxkött", "biff", "entrecote", "ryggbiff", "prosciutto",
+    "lamm", "oxfilé", "oxkött", "biff", "entrecote", "ryggbiff", "högrev", "prosciutto",
     "salami", "chorizo", "lax", "fisk", "torsk", "sej", "räkor", "räka",
     "tonfisk", "skaldjur", "musslor", "kräft", "räk", "skagen", "sill",
     "makrill", "abborre",
@@ -59,7 +59,12 @@ _KÖTT_FISK = {
 _DJUR = _KÖTT_FISK | {
     "ägg", "mjölk", "grädde", "smör", "ost", "yoghurt", "crème", "creme",
     "parmesan", "fetaost", "mozzarella", "honung", "filmjölk", "kvarg", "keso",
+    "halloumi", "paneer", "ricotta", "mascarpone",
 }
+
+# Färdigrätter/produkter har ofta ENGELSKA namn ("Chicken curry") som de svenska
+# ordlistorna missar. Dessa stavningar finns inte i veg-produkter → säkra delsträngar.
+_ENGELSK_KÖTT = ("chicken", "pork", "bacon", "salmon", "tuna", "shrimp", "prawn")
 # Fisk/skaldjur ligger ofta INBÄDDADE i sammansättningar (äppelsill,
 # wannameiräkor, gravlax, havskräftor) → \b-prefix missar dem. Dessa stavningar
 # förekommer inte i icke-fisk-ord, så de är säkra att matcha som ren delsträng.
@@ -410,6 +415,8 @@ def _produkt_strider_mot_diet(produkt: dict, diet: str | None) -> bool:
     if any(re.search(rf"\b{re.escape(ord)}", text) for ord in förbjudna):
         return True
     if any(o in text for o in _INBÄDDAD_FISK):
+        return True
+    if any(o in text for o in _ENGELSK_KÖTT):
         return True
     if diet == "veganskt" and re.search(r"(?<!r)ost", text):
         return True
