@@ -555,16 +555,32 @@ _AVLEDDA_FORMER = (
     "surkål", "inlagd", "inlagda", "pickles", "chips",
 )
 
+# KATEGORI-baserat veto: den mest tillförlitliga och GENERELLA signalen. ICA-
+# katalogens kategoritaxonomi är SLUTEN — en helt ny, aldrig-tidigare-sedd kaka/
+# läsk/barnmat hamnar ändå i samma kategori → vetas utan att vi behöver lägga
+# till dess NAMN. Bara kategorier som ALDRIG är en råvara att laga med (efterrätt/
+# godis/snacks/läsk/färdigmat/barn). MEDVETET EXKLUDERADE: växtmjölk ("Havredryck"
+# /"Sojadryck" = riktiga ingredienser), såser, inlagd sill (kan vara ingrediens).
+# Substrängmatchas mot kategorin; samma skydd som namn-vetot (ordet får ej finnas
+# i ingrediensnamnet, så ingrediensen "glass"/"choklad"/"barnmat" behåller sin produkt).
+_AVLEDDA_KATEGORIER = (
+    "glass", "sorbet", "bakels", "kondis", "godis", "choklad", "pralin",
+    "chips", "snacks", "riskakor", "energidryck", "sportdryck", "fruktdryck",
+    "läsk", "drinkmix", "smaksatt vatten", "barnmat", "barn ", "klämmis",
+    "färdig", "fryst enportion", "fryst pizza", "snabbnudlar", "proteinbar",
+)
+
 
 def _är_avledd_form(produkt: dict, ing_namn: str) -> bool:
-    """True om produkten är en beredd/avledd form (kaka/juice/soppa/sallad...) av
-    en ingrediens som inte bad om den formen → fel produkt för en råvara."""
+    """True om produkten är en beredd/avledd form (kaka/juice/soppa/läsk...) av en
+    ingrediens som inte bad om den formen → fel produkt för en råvara. Kollar
+    KATEGORI först (sluten taxonomi → fångar även okända produkter) och faller
+    tillbaka på NAMN-vetot. Samma skydd: form-ordet får inte finnas i ingrediens-
+    namnet (så ingrediensen "glass"/"tomatsås"/"barnmat" behåller sin produkt)."""
     namn = (produkt.get("namn") or "").lower()
+    kat = (produkt.get("kategori") or "").lower()
     ing = (ing_namn or "").lower()
-    # Barnmat (kategori "Barnmat 4 mån") = puré, inte råvara — "morot" matchar
-    # "Morot Från 4m Semper" nästan lika högt som råa moroten. Vetas via kategori
-    # (robust) om receptet inte uttryckligen vill ha barnmat.
-    if "barnmat" in (produkt.get("kategori") or "").lower() and "barn" not in ing:
+    if any(k in kat and k.strip() not in ing for k in _AVLEDDA_KATEGORIER):
         return True
     return any(f in namn and f not in ing for f in _AVLEDDA_FORMER)
 
