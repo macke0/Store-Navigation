@@ -27,7 +27,7 @@ import math
 import os
 import re
 import threading
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import anthropic
@@ -126,6 +126,13 @@ _MÄTTANDE_KCAL = 350
 # liten rabattvara i en stor korg ger bara nån enstaka procent rabatt — det är
 # ingen "kampanjmåltid". Kräv minst denna relativa rabatt på hela korgen.
 _MIN_KAMPANJANDEL = 0.10
+
+# Fuzzy-matchningen baka(d)s in vid indexering (match_score per ingrediens). En
+# svag träff = sannolikt fel/skräpprodukt (t.ex. tonfisk→lax, "edamer ost"→något
+# helt annat) → visa/prissätt den inte. Tröskeln tillämpas vid SÖKNING (inget
+# nytt index krävs för att justera den) men kräver att indexet bakat match_score.
+# Recept utan match_score (äldre index) släpps igenom oförändrat.
+_MIN_MATCH_SCORE = 55
 
 # Huvudproteinkälla per recept — härleds gratis ur namn+ingredienser (ingen LLM).
 # Används för att SPRIDA träffarna: utan den blir t.ex. "billigt" bara kyckling
@@ -233,17 +240,23 @@ def recept_finns() -> bool:
 # FÖRMATCHNING (offline)
 # ─────────────────────────────────────────────
 
-def _matcha_namn_chunk(namn_lista: list[str]) -> dict[str, str | None]:
+def _matcha_namn_chunk(namn_lista: list[str]) -> dict[str, dict | None]:
     """
     Processpool-arbetare: matcha en grupp unika ingrediensnamn mot sortimentet.
     Varje process laddar sin egen ProduktSök-singleton (en gång) och kör den
-    GIL-bundna fuzzy-sökningen — så flera kärnor jobbar parallellt.
+    GIL-bundna fuzzy-sökningen — så flera kärnor jobbar parallellt. Returnerar
+    BÅDE produkt-id OCH match_score så att svaga (= troligen fel) träffar kan
+    sållas bort vid sökning.
     """
     sök = get_produkt_sök()
-    ut: dict[str, str | None] = {}
+    ut: dict[str, dict | None] = {}
     for namn in namn_lista:
         träffar = sök.sök(namn, 1)
-        ut[namn] = träffar[0].get("id") if träffar else None
+        if träffar:
+            ut[namn] = {"id": träffar[0].get("id"),
+                        "score": träffar[0].get("match_score")}
+        else:
+            ut[namn] = None
     return ut
 
 
@@ -273,7 +286,7 @@ def bygg_recept_index() -> int:
     arbetare = max(1, os.cpu_count() or 2)
     storlek = max(1, math.ceil(len(unika) / arbetare))
     chunkar = [unika[i:i + storlek] for i in range(0, len(unika), storlek)]
-    cache: dict[str, str | None] = {}
+    cache: dict[str, dict | None] = {}
     klar = 0
     with ProcessPoolExecutor(max_workers=arbetare) as pool:
         for delresultat in pool.map(_matcha_namn_chunk, chunkar):
@@ -283,13 +296,118 @@ def bygg_recept_index() -> int:
 
     for r in recept:
         for ing in r.get("ingredienser", []):
-            ing["produkt_id"] = cache.get((ing.get("namn") or "").lower().strip())
+            match = cache.get((ing.get("namn") or "").lower().strip())
+            ing["produkt_id"] = match["id"] if match else None
+            ing["match_score"] = match["score"] if match else None
 
     with open(DATA_FIL, "w", encoding="utf-8") as f:
         json.dump(recept, f, ensure_ascii=False)
     ladda_om_recept()
     print(f"✅ Förmatchade {len(recept)} recept ({len(unika)} unika ingredienser) → {DATA_FIL.name}")
     return len(recept)
+
+
+# ─────────────────────────────────────────────
+# DIET-TAGGNING (offline — Haiku läser hela receptet)
+# ─────────────────────────────────────────────
+# Ordlistorna (_KÖTT_FISK m.fl.) är whack-a-mole: de skannar ord och läcker hela
+# tiden (bresaola, salsiccia, dashi, ostronsås...). I stället låter vi Haiku läsa
+# HELA receptets ingredienser EN gång offline och baka in en ren diet-tagg. Vid
+# sökning blir dietfiltret då ett exakt tagg-uppslag (noll läckor) — ordlistorna
+# behålls bara som skyddsnät för ännu otaggade recept.
+_DIET_GILTIGA = {"kött", "fisk", "vegetariskt", "veganskt"}
+
+_DIET_TAGG_PROMPT = """Du klassar ICA-recept efter kost. För VARJE recept väljer \
+du EXAKT en kategori utifrån de FAKTISKA ingredienserna (inte rättens namn):
+- "kött": innehåller kött, fågel, charkuteri eller vilt
+- "fisk": innehåller fisk eller skaldjur men inget kött/fågel
+- "vegetariskt": inget kött/fågel/fisk/skaldjur, men innehåller mejeri och/eller ägg och/eller honung
+- "veganskt": helt fritt från animaliska produkter (inget kött, fisk, mejeri, ägg eller honung)
+
+Regler:
+- Kött-/fiskbuljong, fisksås, ostronsås, ansjovis, worcestershiresås → kött resp. fisk.
+- Gelatin, ister, löjrom, honung, ägg, smör, grädde, ost, mjölk, yoghurt → animaliskt (ej veganskt; mejeri/ägg/honung utan kött/fisk = vegetariskt).
+- Växtbaserat (havredryck, sojayoghurt, vegansk majonnäs, tofu, vegansk quorn) → räknas inte som animaliskt.
+- Charkvaror som bresaola, salami, chorizo, serrano, prosciutto, salsiccia → kött.
+
+Svara ENDAST med en JSON-array, ett objekt per recept i samma ordning:
+[{"i":0,"diet":"kött"},{"i":1,"diet":"veganskt"}]"""
+
+
+def _tagga_batch(batch: list[dict], model: str) -> dict[str, str]:
+    """Klassa en grupp recept → {recept_id: diet}. Tom dict vid fel/parsfel."""
+    rader = []
+    for i, r in enumerate(batch):
+        ing = ", ".join((x.get("namn") or "") for x in r.get("ingredienser", []))[:600]
+        rader.append(f"{i}. {r.get('namn', '')} | ingredienser: {ing}")
+    try:
+        svar = client.messages.create(
+            model=model,
+            max_tokens=1500,
+            system=[{"type": "text", "text": _DIET_TAGG_PROMPT,
+                     "cache_control": {"type": "ephemeral"}}],
+            messages=[{"role": "user", "content": "Recept:\n" + "\n".join(rader)}],
+        )
+        text = "".join(b.text for b in svar.content if b.type == "text").strip()
+        if text.startswith("```"):
+            text = text.strip("`")
+            text = text[text.find("["):]
+        data = json.loads(text)
+        ut: dict[str, str] = {}
+        for obj in data:
+            idx = obj.get("i")
+            diet = obj.get("diet")
+            if isinstance(idx, int) and 0 <= idx < len(batch) and diet in _DIET_GILTIGA:
+                ut[batch[idx]["id"]] = diet
+        return ut
+    except Exception:
+        return {}
+
+
+def tagga_recept(model: str = MODELL, batch: int = 20, workers: int = 8) -> int:
+    """
+    Dietklassa alla OTAGGADE recept med Haiku och baka in diet_tagg i
+    data/ica_recept.json. Resumebart (recept med diet_tagg hoppas över) och
+    parallellt (Anthropic-klienten är trådsäker). Skriver löpande till disk så
+    att en avbruten körning kan återupptas. Körs offline efter varje scrape.
+    """
+    if not DATA_FIL.exists():
+        print("❌ data/ica_recept.json saknas — kör scrapern först")
+        return 0
+    with open(DATA_FIL, encoding="utf-8") as f:
+        recept = json.load(f)
+
+    otaggade = [r for r in recept if not r.get("diet_tagg") and r.get("id")]
+    print(f"🏷️  {len(otaggade)}/{len(recept)} recept att dietklassa (Haiku, batch {batch})")
+    if not otaggade:
+        return 0
+
+    batchar = [otaggade[i:i + batch] for i in range(0, len(otaggade), batch)]
+    per_id: dict[str, str] = {}
+
+    def spara():
+        for r in recept:
+            t = per_id.get(r.get("id"))
+            if t and not r.get("diet_tagg"):
+                r["diet_tagg"] = t
+        with open(DATA_FIL, "w", encoding="utf-8") as f:
+            json.dump(recept, f, ensure_ascii=False)
+
+    klar = 0
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        framtider = {pool.submit(_tagga_batch, b, model): b for b in batchar}
+        for fut in as_completed(framtider):
+            per_id.update(fut.result())
+            klar += 1
+            if klar % 50 == 0:
+                spara()                       # checkpoint → resumebart
+            if klar % 10 == 0 or klar == len(batchar):
+                print(f"   {klar}/{len(batchar)} batchar ({len(per_id)} taggade)", end="\r")
+    print()
+    spara()
+    ladda_om_recept()
+    print(f"✅ Dietklassade {len(per_id)} recept → {DATA_FIL.name}")
+    return len(per_id)
 
 
 # ─────────────────────────────────────────────
@@ -306,21 +424,23 @@ Schema:
   "diet": null,             // "vegetariskt", "veganskt" eller null
   "sortering": "relevans",  // "kampanj" om kunden vill ha rätter byggda på KAMPANJER/erbjudanden/rabatter/dagens fynd (måltider som blir billigare än vanligt); "billigt" om billigast totalt/spara pengar utan att nämna kampanj; "protein" om proteinrikt; "snabbt" om snabbt/få minuter; annars "relevans"
   "max_tid_min": null,      // heltal om kunden anger en tidsgräns, annars null
+  "svårighet": null,        // "enkelt" om kunden vill ha lätt/snabblagat/nybörjare; "avancerat" om kunden vill laga något krångligt/festligt/utmanande; annars null
   "vill_efterrätt_dryck": false, // true ENDAST om kunden uttryckligen vill ha efterrätt/dessert/bakverk/fika/dryck/drink. Annars false (kunden vill ha vanlig mat/måltid).
   "nyckelord": []           // övriga sökord på svenska, gemener (t.ex. ["middag","gryta"]). Tom om inga.
 }
 
 Exempel:
-"ge mig något billigt" → {"ingredienser_med":[],"diet":null,"sortering":"billigt","max_tid_min":null,"vill_efterrätt_dryck":false,"nyckelord":[]}
-"high protein chicken dinner" → {"ingredienser_med":["kyckling"],"diet":null,"sortering":"protein","max_tid_min":null,"vill_efterrätt_dryck":false,"nyckelord":["middag"]}
-"maträtter som använder dagens kampanjer" → {"ingredienser_med":[],"diet":null,"sortering":"kampanj","max_tid_min":null,"vill_efterrätt_dryck":false,"nyckelord":[]}
-"vegetariskt på 20 minuter" → {"ingredienser_med":[],"diet":"vegetariskt","sortering":"snabbt","max_tid_min":20,"vill_efterrätt_dryck":false,"nyckelord":[]}
-"en god efterrätt" → {"ingredienser_med":[],"diet":null,"sortering":"relevans","max_tid_min":null,"vill_efterrätt_dryck":true,"nyckelord":["efterrätt"]}"""
+"ge mig något billigt" → {"ingredienser_med":[],"diet":null,"sortering":"billigt","max_tid_min":null,"svårighet":null,"vill_efterrätt_dryck":false,"nyckelord":[]}
+"high protein chicken dinner" → {"ingredienser_med":["kyckling"],"diet":null,"sortering":"protein","max_tid_min":null,"svårighet":null,"vill_efterrätt_dryck":false,"nyckelord":["middag"]}
+"maträtter som använder dagens kampanjer" → {"ingredienser_med":[],"diet":null,"sortering":"kampanj","max_tid_min":null,"svårighet":null,"vill_efterrätt_dryck":false,"nyckelord":[]}
+"enkel vegetarisk middag på 20 minuter" → {"ingredienser_med":[],"diet":"vegetariskt","sortering":"snabbt","max_tid_min":20,"svårighet":"enkelt","vill_efterrätt_dryck":false,"nyckelord":["middag"]}
+"en god efterrätt" → {"ingredienser_med":[],"diet":null,"sortering":"relevans","max_tid_min":null,"svårighet":null,"vill_efterrätt_dryck":true,"nyckelord":["efterrätt"]}"""
 
 
 def _parsa_fraga(meddelande: str, model: str = MODELL) -> dict:
     standard = {"ingredienser_med": [], "diet": None, "sortering": "relevans",
-                "max_tid_min": None, "vill_efterrätt_dryck": False, "nyckelord": []}
+                "max_tid_min": None, "svårighet": None,
+                "vill_efterrätt_dryck": False, "nyckelord": []}
     try:
         svar = client.messages.create(
             model=model,
@@ -359,15 +479,8 @@ def _prissatt(recept: dict, sök, diet: str | None = None) -> tuple[float, float
     kampanjer = 0
     prissatta = 0
     for ing in recept.get("ingredienser", []):
-        if _är_skafferi(ing.get("namn", "")):
-            continue
-        pid = ing.get("produkt_id")
-        if not pid:
-            continue
-        p = sök.id_index.get(pid)
+        p = _matchad_produkt(ing, sök, diet)
         if not p:
-            continue
-        if _produkt_strider_mot_diet(p, diet):
             continue
         ord_pris = _flyt(p.get("pris"))
         kampanj = _flyt(p.get("kampanjpris"))
@@ -427,9 +540,37 @@ def _produkt_strider_mot_diet(produkt: dict, diet: str | None) -> bool:
     return False
 
 
+def _matchad_produkt(ing: dict, sök, diet: str | None) -> dict | None:
+    """Den produkt en ingrediens ska prissättas/visas med — eller None. Sållar
+    bort (a) skafferivaror (olja/salt/peppar), (b) för svaga fuzzy-träffar
+    (skräpprodukter, < _MIN_MATCH_SCORE) och (c) produkter som bryter mot dieten.
+    En enda grind så att _prissatt och _till_matratt alltid är samstämmiga."""
+    if _är_skafferi(ing.get("namn", "")):
+        return None
+    ms = ing.get("match_score")
+    if ms is not None and ms < _MIN_MATCH_SCORE:    # äldre index saknar nyckeln → släpp igenom
+        return None
+    pid = ing.get("produkt_id")
+    if not pid:
+        return None
+    p = sök.id_index.get(pid)
+    if not p or _produkt_strider_mot_diet(p, diet):
+        return None
+    return p
+
+
 def _matchar_diet(recept: dict, diet: str | None) -> bool:
     if not diet:
         return True
+    # Förbyggd diet-tagg (Haiku läste hela receptet offline) → lita på den. En
+    # vegansk rätt duger för både veganskt och vegetariskt; en vegetarisk bara
+    # för vegetariskt. Detta ersätter ordliste-whack-a-mole för taggade recept.
+    tagg = recept.get("diet_tagg")
+    if tagg:
+        if diet == "veganskt":
+            return tagg == "veganskt"
+        return tagg in ("vegetariskt", "veganskt")
+    # Fallback för ännu otaggade recept: skanna ordlistorna (skyddsnät).
     förbjudna = _DJUR if diet == "veganskt" else _KÖTT_FISK
     # Skanna ingrediensnamnen (mest pålitliga signalen) tillsammans med taggar —
     # taggar saknar ofta råvaran (t.ex. "sardin"), så enbart taggar släpper
@@ -540,6 +681,21 @@ def _tid_min(recept: dict) -> int | None:
     return h * 60 + mn or None
 
 
+def _svårighet(recept: dict) -> str:
+    """Grov svårighetsgrad härledd GRATIS ur antal steg + ingredienser + tid
+    (ingen LLM). 'enkelt' / 'medel' / 'avancerat'. Trösklarna är gissningar —
+    justera utifrån verkliga batchar."""
+    steg = len(recept.get("instruktioner") or [])
+    antal_ing = len(recept.get("ingredienser") or [])
+    tid = _tid_min(recept) or 0
+    poäng = steg + antal_ing * 0.4 + tid / 12
+    if poäng <= 9:
+        return "enkelt"
+    if poäng <= 16:
+        return "medel"
+    return "avancerat"
+
+
 # ─────────────────────────────────────────────
 # ENRICHMENT → matratter-format (iOS oförändrad)
 # ─────────────────────────────────────────────
@@ -556,13 +712,11 @@ def _till_matratt(recept: dict, sök, produkt_db: dict,
                   diet: str | None = None) -> dict:
     ingredienser = []
     for ing in recept.get("ingredienser", []):
-        pid = ing.get("produkt_id")
-        p = sök.id_index.get(pid) if pid else None
-        # Visa inte en köttprodukt som matchats till en veg-ingrediens, och inte
-        # skräpträffar för skafferivaror (olja→babyolja, peppar→pepparbiff).
-        if p and (_produkt_strider_mot_diet(p, diet) or _är_skafferi(ing.get("namn", ""))):
-            p = None
-            pid = None
+        # Samma grind som prissättningen: dölj skafferivaror, svaga fuzzy-träffar
+        # och produkter som bryter mot dieten (olja→babyolja, peppar→pepparbiff,
+        # kött i veg-rätt) → de visas som omatchade i inköpslistan.
+        p = _matchad_produkt(ing, sök, diet)
+        pid = p.get("id") if p else None
         pos = produkt_db.get(pid) or {}
         mangd = " ".join(filter(None, [ing.get("mangd", ""), ing.get("enhet", "")])).strip() \
             or ing.get("text", "")
@@ -593,6 +747,9 @@ def _till_matratt(recept: dict, sök, produkt_db: dict,
         "bild_url":     _bild_url(recept),
         "betyg":        recept.get("betyg"),
         "antal_betyg":  recept.get("antal_betyg"),
+        "tid_min":      _tid_min(recept),
+        "svårighet":    _svårighet(recept),
+        "diet_tagg":    recept.get("diet_tagg"),
         "total_pris":   total,
         "ordinarie_pris": ordinarie,
         "besparing":    besparing,
@@ -617,6 +774,7 @@ def sok_recept(meddelande: str, karta: str = "hela_butiken",
     med = filt.get("ingredienser_med") or []
     diet = filt.get("diet")
     max_tid = filt.get("max_tid_min")
+    önskad_svårighet = filt.get("svårighet")
     vill_efterrätt = bool(filt.get("vill_efterrätt_dryck"))
 
     scored: list[dict] = []
@@ -640,6 +798,10 @@ def sok_recept(meddelande: str, karta: str = "hela_butiken",
             t = _tid_min(r)
             if t and t > max_tid:
                 continue
+        # Svårighetsfilter: "enkelt" släpper bara enkla, "avancerat" bara
+        # avancerade (recept med okänd tid/steg hamnar i "medel" → utesluts då).
+        if önskad_svårighet and _svårighet(r) != önskad_svårighet:
+            continue
         total, ordinarie, besparing, kampanjer, prissatta = _prissatt(r, sök, diet)
         # Inget matchat = tom inköpslista → värdelös träff i kund-flödet.
         if prissatta == 0:
@@ -685,6 +847,8 @@ if __name__ == "__main__":
     import sys
     if len(sys.argv) > 1 and sys.argv[1] == "index":
         bygg_recept_index()
+    elif len(sys.argv) > 1 and sys.argv[1] == "tagga":
+        tagga_recept()
     else:
         fråga = sys.argv[1] if len(sys.argv) > 1 else "ge mig något billigt"
         import json as _j
