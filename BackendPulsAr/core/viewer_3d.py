@@ -120,7 +120,7 @@ body{background:#0a0a0a;color:#e0e0e0;overflow:hidden;height:100vh;
     <button class="mode-btn" id="mTakBort" onclick="toggleTak()" title="Visa/dölj tak">Tak av</button>
     <button class="mode-btn active" id="mMesh" onclick="setRender('mesh')" title="Visa LiDAR-mesh">Mesh</button>
     <button class="mode-btn" id="mPunkter" onclick="setRender('punkter')" title="Visa punktmoln">Punkter</button>
-    <button class="mode-btn" id="mLive" onclick="toggleLivePos()" title="Visa live-position från iPhone (pollar var sekund)">Live</button>
+    <button class="mode-btn" id="mLive" onclick="toggleLivePos()" title="Visa live-position från iPhone (pollar flera ggr/sek)">Live</button>
     <span class="stat" id="statTxt"></span>
     <span class="stat" id="livePosTxt" style="color:#00aaff"></span>
   </div>
@@ -318,7 +318,7 @@ function toggleLivePos(){
     btn.classList.remove('active');
   } else {
     pollLivePos();
-    livePosTimer = setInterval(pollLivePos, 1000);
+    livePosTimer = setInterval(pollLivePos, 400);
     btn.classList.add('active');
   }
 }
