@@ -216,12 +216,25 @@ class ServerUploader: ObservableObject {
     // ─────────────────────────────────────────────
 
     @MainActor
-    func laddaUppSkanning3D(videoURL: URL?, arFrames: [[String: Any]], punkter3D: [Punkt3D]) async {
+    func laddaUppSkanning3D(videoURL: URL?, arFrames: [[String: Any]], punkter3D punkterIn: [Punkt3D]) async {
         guard !laddarUpp else {
             print("⚠️ Uppladdning pågår redan")
             return
         }
         guard let mapp = videoURL else { return }
+
+        // ── Downsample 3D-punkter innan upload ──────────────────────────────
+        // 555k punkter → ~140k. JSON-storleken minskar ~4×, vilket är
+        // den enskilt största posten i varje batch. Vi tar var 4:e punkt
+        // (deterministisk stride — håller frame-fördelningen jämn).
+        let punkterFaktor = 4
+        let punkter3D: [Punkt3D]
+        if punkterIn.count > 50_000 && punkterFaktor > 1 {
+            punkter3D = stride(from: 0, to: punkterIn.count, by: punkterFaktor).map { punkterIn[$0] }
+            print("📉 Downsamplade 3D-punkter: \(punkterIn.count) → \(punkter3D.count) (var \(punkterFaktor):e)")
+        } else {
+            punkter3D = punkterIn
+        }
 
         laddarUpp     = true
         progress      = 0.0
@@ -384,27 +397,64 @@ class ServerUploader: ObservableObject {
             // Hitta mesh-mappen
             if let firstFrame = filer.first {
                 let skanningsmapp = firstFrame.deletingLastPathComponent()
-                let meshMapp = skanningsmapp.appendingPathComponent("mesh")
-                
-                if FileManager.default.fileExists(atPath: meshMapp.path) {
-                    let meshFiler = (try? FileManager.default.contentsOfDirectory(at: meshMapp, includingPropertiesForKeys: nil)) ?? []
-                    let binFiler = meshFiler.filter { $0.pathExtension == "bin" }
-                    
-                    print("📦 Skickar \(binFiler.count) mesh-anchors")
-                    
-                    for meshFil in binFiler {
-                        try writeString("--\(boundary)\r\n")
-                        try writeString("Content-Disposition: form-data; name=\"mesh\"; filename=\"\(meshFil.lastPathComponent)\"\r\n")
-                        try writeString("Content-Type: application/octet-stream\r\n\r\n")
-                        let meshHandle = try FileHandle(forReadingFrom: meshFil)
-                        while true {
-                            let chunk = try meshHandle.read(upToCount: 65_536) ?? Data()
-                            if chunk.isEmpty { break }
-                            try handle.write(contentsOf: chunk)
+
+                // .bin-filer är redundanta nu när mesh.glb skickas direkt — droppade för
+                // att korta upload. Sätt true för att aktivera igen.
+                let skickaBinFiler = false
+                if skickaBinFiler {
+                    let meshMapp = skanningsmapp.appendingPathComponent("mesh")
+                    if FileManager.default.fileExists(atPath: meshMapp.path) {
+                        let meshFiler = (try? FileManager.default.contentsOfDirectory(at: meshMapp, includingPropertiesForKeys: nil)) ?? []
+                        let binFiler = meshFiler.filter { $0.pathExtension == "bin" }
+
+                        print("📦 Skickar \(binFiler.count) mesh-anchors")
+
+                        for meshFil in binFiler {
+                            try writeString("--\(boundary)\r\n")
+                            try writeString("Content-Disposition: form-data; name=\"mesh\"; filename=\"\(meshFil.lastPathComponent)\"\r\n")
+                            try writeString("Content-Type: application/octet-stream\r\n\r\n")
+                            let meshHandle = try FileHandle(forReadingFrom: meshFil)
+                            while true {
+                                let chunk = try meshHandle.read(upToCount: 65_536) ?? Data()
+                                if chunk.isEmpty { break }
+                                try handle.write(contentsOf: chunk)
+                            }
+                            try meshHandle.close()
+                            try writeString("\r\n")
                         }
-                        try meshHandle.close()
-                        try writeString("\r\n")
                     }
+                }
+
+                // mesh_status.txt — diagnostik från MeshExporter (skickas till servern
+                // så vi kan se i serverloggen om mesh.glb skapades eller misslyckades)
+                let statusFil = skanningsmapp.appendingPathComponent("mesh_status.txt")
+                if let statusStr = try? String(contentsOf: statusFil, encoding: .utf8) {
+                    try writeString("--\(boundary)\r\n")
+                    try writeString("Content-Disposition: form-data; name=\"mesh_status\"\r\n\r\n")
+                    try writeString("\(statusStr)\r\n")
+                } else {
+                    try writeString("--\(boundary)\r\n")
+                    try writeString("Content-Disposition: form-data; name=\"mesh_status\"\r\n\r\n")
+                    try writeString("(saknas — stoppaSpelaIn kördes inte?)\r\n")
+                }
+
+                // mesh.glb — färdig LiDAR-mesh från MeshExporter, kan visas direkt i /viewer/3d
+                let glbFil = skanningsmapp.appendingPathComponent("mesh.glb")
+                if FileManager.default.fileExists(atPath: glbFil.path) {
+                    let storlek = (try? FileManager.default.attributesOfItem(atPath: glbFil.path)[.size] as? Int) ?? 0
+                    print("📦 Skickar mesh.glb (\(storlek / 1024) KB)")
+
+                    try writeString("--\(boundary)\r\n")
+                    try writeString("Content-Disposition: form-data; name=\"mesh_glb\"; filename=\"mesh.glb\"\r\n")
+                    try writeString("Content-Type: model/gltf-binary\r\n\r\n")
+                    let glbHandle = try FileHandle(forReadingFrom: glbFil)
+                    while true {
+                        let chunk = try glbHandle.read(upToCount: 65_536) ?? Data()
+                        if chunk.isEmpty { break }
+                        try handle.write(contentsOf: chunk)
+                    }
+                    try glbHandle.close()
+                    try writeString("\r\n")
                 }
             }
         }

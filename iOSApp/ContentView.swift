@@ -4,233 +4,199 @@ struct ContentView: View {
     @State private var visaPersonalmeny = false
     @State private var animateIn = false
 
-    private let icaRöd = Color(red: 0.89, green: 0.12, blue: 0.17)
-    private let icaMörkRöd = Color(red: 0.72, green: 0.08, blue: 0.12)
-
     var body: some View {
         NavigationView {
             ZStack {
-                // Bakgrund
-                Color.black.ignoresSafeArea()
+                Tema.bakgrund.ignoresSafeArea()
 
-                // Bakgrund - mörk gradient med röd accent
-                LinearGradient(
-                    colors: [
-                        Color(red: 0.35, green: 0.05, blue: 0.05),
-                        Color(red: 0.15, green: 0.02, blue: 0.02),
-                        .black
-                    ],
-                    startPoint: .top,
-                    endPoint: .center
-                )
-                .ignoresSafeArea()
+                ScrollView {
+                    VStack(spacing: 24) {
+                        rubrik
+                            .padding(.top, 24)
 
-                // Gradient overlay
-                VStack {
-                    Spacer()
-                        .frame(height: 150)
-                    LinearGradient(
-                        colors: [
-                            .black.opacity(0.0),
-                            .black.opacity(0.7),
-                            .black.opacity(0.95),
-                            .black
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                }
-                .ignoresSafeArea()
-
-                // Innehåll
-                VStack(spacing: 0) {
-                    Spacer()
-
-                    // Logo & titel
-                    VStack(spacing: 16) {
-                        ZStack {
-                            RoundedRectangle(cornerRadius: 22)
-                                .fill(
-                                    LinearGradient(
-                                        colors: [icaRöd, icaMörkRöd],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    )
-                                )
-                                .frame(width: 74, height: 74)
-                                .shadow(color: icaRöd.opacity(0.4), radius: 16, y: 6)
-
-                            Image(systemName: "cart.fill")
-                                .font(.system(size: 32, weight: .medium))
-                                .foregroundColor(.white)
-                        }
-                        .opacity(animateIn ? 1 : 0)
-                        .offset(y: animateIn ? 0 : 20)
-
-                        VStack(spacing: 6) {
-                            Text("Puls-AR")
-                                .font(.system(size: 36, weight: .bold, design: .rounded))
-                                .foregroundColor(.white)
-
-                            Text("ICA Maxi Bromma")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundColor(.white.opacity(0.5))
-                                .tracking(2)
-                                .textCase(.uppercase)
-                        }
-                        .opacity(animateIn ? 1 : 0)
-                        .offset(y: animateIn ? 0 : 15)
-                    }
-                    .padding(.bottom, 44)
-
-                    // Knappar
-                    VStack(spacing: 12) {
-                        // Assistent-knapp (kundens framsida)
-                        NavigationLink(destination: KundAssistentView()) {
-                            HStack(spacing: 12) {
-                                Image(systemName: "sparkles")
-                                    .font(.system(size: 16, weight: .bold))
-                                    .foregroundColor(.white)
-
-                                Text("Fråga assistenten")
-                                    .font(.system(size: 16, weight: .bold, design: .rounded))
-                                    .foregroundColor(.white)
-
-                                Spacer()
-
-                                Image(systemName: "chevron.right")
-                                    .font(.system(size: 13, weight: .bold))
-                                    .foregroundColor(.white.opacity(0.6))
-                            }
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 16)
-                            .background(
-                                LinearGradient(
-                                    colors: [icaRöd, icaMörkRöd],
-                                    startPoint: .leading,
-                                    endPoint: .trailing
-                                )
-                            )
-                            .cornerRadius(14)
-                            .shadow(color: icaRöd.opacity(0.35), radius: 10, y: 4)
-                        }
-                        .opacity(animateIn ? 1 : 0)
-                        .offset(y: animateIn ? 0 : 20)
-
-                        // Matinspiration-knapp (maträtter med bilder + kampanjer)
+                        // Hjälte: Matinspiration — appens starkaste, mest visuella flöde.
                         NavigationLink(destination: MaträttView()) {
-                            HStack(spacing: 12) {
-                                Image(systemName: "fork.knife")
-                                    .font(.system(size: 16, weight: .bold))
-                                    .foregroundColor(.white)
+                            hjälteKort
+                        }
+                        .buttonStyle(TryckStyle())
+                        .opacity(animateIn ? 1 : 0)
+                        .offset(y: animateIn ? 0 : 24)
 
-                                Text("Matinspiration")
-                                    .font(.system(size: 16, weight: .bold, design: .rounded))
-                                    .foregroundColor(.white)
-
-                                Spacer()
-
-                                Image(systemName: "chevron.right")
-                                    .font(.system(size: 13, weight: .bold))
-                                    .foregroundColor(.white.opacity(0.6))
-                            }
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 16)
-                            .background(
-                                LinearGradient(
-                                    colors: [icaRöd, icaMörkRöd],
-                                    startPoint: .leading,
-                                    endPoint: .trailing
+                        VStack(spacing: 12) {
+                            // Varusökning = hitta en specifik vara och navigera dit.
+                            NavigationLink(destination: KundAssistentView()) {
+                                radKort(
+                                    ikon: "magnifyingglass",
+                                    titel: "Hitta en vara",
+                                    undertitel: "Sök & navigera till varor i butiken",
+                                    accent: Tema.röd
                                 )
-                            )
-                            .cornerRadius(14)
-                            .shadow(color: icaRöd.opacity(0.35), radius: 10, y: 4)
-                        }
-                        .opacity(animateIn ? 1 : 0)
-                        .offset(y: animateIn ? 0 : 20)
-
-                        // Sök-knapp
-                        NavigationLink(destination: SökView()) {
-                            HStack(spacing: 12) {
-                                Image(systemName: "magnifyingglass")
-                                    .font(.system(size: 16, weight: .bold))
-                                    .foregroundColor(.white)
-
-                                Text("Hitta en vara")
-                                    .font(.system(size: 16, weight: .bold, design: .rounded))
-                                    .foregroundColor(.white)
-
-                                Spacer()
-
-                                Image(systemName: "chevron.right")
-                                    .font(.system(size: 13, weight: .bold))
-                                    .foregroundColor(.white.opacity(0.6))
                             }
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 16)
-                            .background(
-                                LinearGradient(
-                                    colors: [icaRöd, icaMörkRöd],
-                                    startPoint: .leading,
-                                    endPoint: .trailing
+                            .buttonStyle(TryckStyle())
+
+                            // Personal = butiksskanning (separat från kundsidan).
+                            Button {
+                                Haptik.tryck()
+                                visaPersonalmeny = true
+                            } label: {
+                                radKort(
+                                    ikon: "person.badge.key.fill",
+                                    titel: "Personal",
+                                    undertitel: "Skanna & bygg butikskartan",
+                                    accent: Tema.textSvag
                                 )
-                            )
-                            .cornerRadius(14)
-                            .shadow(color: icaRöd.opacity(0.35), radius: 10, y: 4)
-                        }
-                        .opacity(animateIn ? 1 : 0)
-                        .offset(y: animateIn ? 0 : 20)
-
-                        // Personal-knapp
-                        Button { visaPersonalmeny = true } label: {
-                            HStack(spacing: 12) {
-                                Image(systemName: "person.badge.key.fill")
-                                    .font(.system(size: 16, weight: .bold))
-                                    .foregroundColor(.white.opacity(0.8))
-
-                                Text("Personal")
-                                    .font(.system(size: 16, weight: .bold, design: .rounded))
-                                    .foregroundColor(.white.opacity(0.8))
-
-                                Spacer()
-
-                                Image(systemName: "chevron.right")
-                                    .font(.system(size: 13, weight: .bold))
-                                    .foregroundColor(.white.opacity(0.3))
                             }
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 16)
-                            .background(.ultraThinMaterial)
-                            .cornerRadius(14)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 14)
-                                    .stroke(.white.opacity(0.1), lineWidth: 1)
-                            )
-                        }
-                        .sheet(isPresented: $visaPersonalmeny) {
-                            SkanningMenyView()
+                            .buttonStyle(TryckStyle())
+                            .sheet(isPresented: $visaPersonalmeny) {
+                                SkanningMenyView()
+                            }
                         }
                         .opacity(animateIn ? 1 : 0)
-                        .offset(y: animateIn ? 0 : 20)
+                        .offset(y: animateIn ? 0 : 24)
+
+                        Text("v1.0")
+                            .font(Tema.Typ.liten)
+                            .foregroundColor(Tema.textTunn)
+                            .padding(.top, 8)
                     }
-                    .padding(.horizontal, 36)
-
-                    Spacer()
-                        .frame(height: 50)
-
-                    Text("v1.0")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(.white.opacity(0.15))
-                        .padding(.bottom, 12)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 40)
                 }
             }
             .navigationBarHidden(true)
             .onAppear {
-                withAnimation(.easeOut(duration: 0.8)) {
+                withAnimation(.spring(response: 0.6, dampingFraction: 0.8)) {
                     animateIn = true
                 }
             }
         }
+        .navigationViewStyle(.stack)
+    }
+
+    // MARK: Rubrik
+
+    private var rubrik: some View {
+        VStack(spacing: 14) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(
+                        LinearGradient(colors: [Tema.röd, Tema.mörkRöd],
+                                       startPoint: .topLeading, endPoint: .bottomTrailing)
+                    )
+                    .frame(width: 68, height: 68)
+                    .shadow(color: Tema.röd.opacity(0.35), radius: 14, y: 6)
+                Image(systemName: "cart.fill")
+                    .font(.system(size: 30, weight: .medium))
+                    .foregroundColor(.white)
+            }
+            .opacity(animateIn ? 1 : 0)
+            .offset(y: animateIn ? 0 : 16)
+
+            VStack(spacing: 4) {
+                Text("Puls-AR")
+                    .font(Tema.Typ.display)
+                    .foregroundColor(Tema.text)
+                Text("ICA MAXI BROMMA")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(Tema.textSvag)
+                    .tracking(2)
+            }
+            .opacity(animateIn ? 1 : 0)
+            .offset(y: animateIn ? 0 : 12)
+        }
+    }
+
+    // MARK: Hjälte-kort
+
+    private var hjälteKort: some View {
+        // Magasin-stil: hög bildyta med titeln OVANPÅ via mörk scrim, en liten
+        // kategori-pill uppe till vänster. Aptitlig varm gradient som "foto" tills
+        // riktiga rättbilder bundlas.
+        ZStack(alignment: .bottomLeading) {
+            LinearGradient(
+                colors: [
+                    Color(red: 0.97, green: 0.45, blue: 0.20),
+                    Color(red: 0.95, green: 0.30, blue: 0.16),
+                    Tema.mörkRöd
+                ],
+                startPoint: .topLeading, endPoint: .bottomTrailing
+            )
+            // Dekorativa symboler högt upp, dämpade så de inte konkurrerar med titeln.
+            Image(systemName: "fork.knife")
+                .font(.system(size: 110, weight: .bold))
+                .foregroundColor(.white.opacity(0.10))
+                .rotationEffect(.degrees(-12))
+                .offset(x: 150, y: -36)
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 5) {
+                    Image(systemName: "sparkles").font(.system(size: 10, weight: .bold))
+                    Text("DAGENS KAMPANJER").font(.system(size: 10, weight: .heavy)).tracking(1.2)
+                }
+                .foregroundColor(.white)
+                .padding(.horizontal, 10).padding(.vertical, 5)
+                .background(.white.opacity(0.22))
+                .clipShape(Capsule())
+
+                Spacer()
+
+                Text("Matinspiration")
+                    .font(.system(size: 26, weight: .heavy, design: .rounded))
+                    .foregroundColor(.white)
+                Text("Recept & erbjudanden — med priser och besparing")
+                    .font(Tema.Typ.under)
+                    .foregroundColor(.white.opacity(0.92))
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+            }
+            .padding(18)
+        }
+        .frame(height: 200)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .bildScrim(hörn: 24)
+        .overlay(RoundedRectangle(cornerRadius: 24).stroke(Tema.kortKant, lineWidth: 1))
+        .shadow(color: Tema.röd.opacity(0.28), radius: 18, y: 8)
+    }
+
+    // MARK: Rad-kort
+
+    private func radKort(ikon: String, titel: String, undertitel: String, accent: Color) -> some View {
+        HStack(spacing: 14) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(accent.opacity(0.12))
+                    .frame(width: 44, height: 44)
+                Image(systemName: ikon)
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundColor(accent)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(titel)
+                    .font(Tema.Typ.titel)
+                    .foregroundColor(Tema.text)
+                Text(undertitel)
+                    .font(Tema.Typ.under)
+                    .foregroundColor(Tema.textSvag)
+            }
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundColor(Tema.textTunn)
+        }
+        .padding(14)
+        .kortYta()
+    }
+}
+
+/// Direkt-känsla vid tryck: liten skala + haptik så knappen svarar omedelbart.
+struct TryckStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: configuration.isPressed)
+            .onChange(of: configuration.isPressed) { _, nytt in
+                if nytt { Haptik.tryck() }
+            }
     }
 }
 

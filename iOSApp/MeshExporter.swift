@@ -148,27 +148,31 @@ enum MeshExporter {
         var bin = Data()
         bin.reserveCapacity(positions.count * 12 + normaler.count * 12 + index.count * 4 + 32)
 
+        // VIKTIGT: SIMD3<Float> i Swift har stride=16 (4 bytes padding för alignment).
+        // glTF kräver packed VEC3 = exakt 12 bytes/element. Skriv x,y,z explicit.
+
         let posOffset = bin.count
-        positions.withUnsafeBufferPointer { ptr in
-            bin.append(UnsafeBufferPointer(rebasing: ptr).withMemoryRebound(to: UInt8.self) { buf in
-                Data(buffer: buf)
-            })
+        for p in positions {
+            var x = p.x, y = p.y, z = p.z
+            withUnsafeBytes(of: &x) { bin.append(contentsOf: $0) }
+            withUnsafeBytes(of: &y) { bin.append(contentsOf: $0) }
+            withUnsafeBytes(of: &z) { bin.append(contentsOf: $0) }
         }
         align(&bin, to: 4, fill: 0)
 
         let normOffset = bin.count
-        normaler.withUnsafeBufferPointer { ptr in
-            bin.append(UnsafeBufferPointer(rebasing: ptr).withMemoryRebound(to: UInt8.self) { buf in
-                Data(buffer: buf)
-            })
+        for n in normaler {
+            var x = n.x, y = n.y, z = n.z
+            withUnsafeBytes(of: &x) { bin.append(contentsOf: $0) }
+            withUnsafeBytes(of: &y) { bin.append(contentsOf: $0) }
+            withUnsafeBytes(of: &z) { bin.append(contentsOf: $0) }
         }
         align(&bin, to: 4, fill: 0)
 
         let idxOffset = bin.count
-        index.withUnsafeBufferPointer { ptr in
-            bin.append(UnsafeBufferPointer(rebasing: ptr).withMemoryRebound(to: UInt8.self) { buf in
-                Data(buffer: buf)
-            })
+        for i in index {
+            var v = i.littleEndian
+            withUnsafeBytes(of: &v) { bin.append(contentsOf: $0) }
         }
         align(&bin, to: 4, fill: 0)
 

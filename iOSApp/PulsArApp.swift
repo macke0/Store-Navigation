@@ -11,7 +11,9 @@ import SwiftUI
 struct PulsArApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     var body: some Scene {
-        WindowGroup { ContentView() }
+        // Lås ljust läge — kund-UI:t är designat ljust (ICA-vitt). Utan detta
+        // flippar systemfärger om telefonen står i mörkt läge och bryter temat.
+        WindowGroup { ContentView().preferredColorScheme(.light) }
     }
 }
 

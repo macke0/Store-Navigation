@@ -43,6 +43,16 @@ struct SkanningMenyView: View {
                         ) {
                             AnyView(PreflightView())
                         }
+
+                        // Läge 2 — Skanna produkter mot befintlig karta
+                        StegKort(
+                            titel:       "Skanna produkter",
+                            beskrivning: "Lokalisera dig mot kartan, sedan filma hyllorna. Produkter sparas med koordinater.",
+                            ikon:        "tag.fill",
+                            färg:        .purple
+                        ) {
+                            AnyView(ProduktSkanningView(kartaNamn: "hela_butiken"))
+                        }
                         /*
                         // Kartlägg (behålls för ankarpunkter)
                         StegKort(
@@ -71,6 +81,16 @@ struct SkanningMenyView: View {
                             färg:        .cyan
                         ) {
                             AnyView(NavigationKartView(butikId: "bromma_maxi"))
+                        }
+
+                        // VPS-test - lokalisera mot 3D-karta + visa live på admin-vy
+                        StegKort(
+                            titel:       "Testa VPS-lokalisering",
+                            beskrivning: "Stå på en känd plats, scanna och se din position som blå dot på /viewer/3d.",
+                            ikon:        "location.viewfinder",
+                            färg:        .green
+                        ) {
+                            AnyView(VPSTestView())
                         }
 
                         // Tips
