@@ -561,6 +561,11 @@ def _är_avledd_form(produkt: dict, ing_namn: str) -> bool:
     en ingrediens som inte bad om den formen → fel produkt för en råvara."""
     namn = (produkt.get("namn") or "").lower()
     ing = (ing_namn or "").lower()
+    # Barnmat (kategori "Barnmat 4 mån") = puré, inte råvara — "morot" matchar
+    # "Morot Från 4m Semper" nästan lika högt som råa moroten. Vetas via kategori
+    # (robust) om receptet inte uttryckligen vill ha barnmat.
+    if "barnmat" in (produkt.get("kategori") or "").lower() and "barn" not in ing:
+        return True
     return any(f in namn and f not in ing for f in _AVLEDDA_FORMER)
 
 
