@@ -608,6 +608,33 @@ def _aktuell_besparing(p: dict) -> float:
     return max(0.0, ord_pris - kampanj) if ord_pris is not None else 0.0
 
 
+def _ingrediens_huvudord(namn: str) -> str:
+    """Råvarans huvudord = sista alfabetiska ordet (svenska sammansättningar har
+    substantivet sist: 'hel vitlök'→vitlök, 'riven prästost'→prästost)."""
+    ord = re.findall(r"[a-zåäö]+", (namn or "").lower())
+    return ord[-1] if ord else ""
+
+
+def _huvudord_poäng(produkt: dict, huvud: str) -> int:
+    """Hur väl produktNAMNET har råvaran som huvudord. 3 = produkten HETER råvaran
+    (Ägg…, Morot…, Vitlök…), 2 = råvaran är ett helt ord (…med vitlök), 1 = samman-
+    sättning som ÄR en typ av råvaran (vetemjöl⊇mjöl, arborioris⊇ris), 0 = råvaran
+    bara prefix av ett annat ord (äggvita, mjölkdryck, islåda) → ratas vid lika.
+    Bryter delsträngs-bias i fuzzy-sökningen utan att röra själva sökmotorn."""
+    if not huvud:
+        return 0
+    ord = re.findall(r"[a-zåäö]+", (produkt.get("namn") or "").lower())
+    if not ord:
+        return 0
+    if ord[0] == huvud:
+        return 3
+    if huvud in ord:
+        return 2
+    if any(o.endswith(huvud) and len(o) > len(huvud) for o in ord):
+        return 1
+    return 0
+
+
 def _matchad_produkt(ing: dict, sök, diet: str | None) -> dict | None:
     """Den produkt en ingrediens ska prissättas/visas med — eller None. Sållar
     bort (a) skafferivaror (olja/salt/peppar), (b) för svaga fuzzy-träffar
@@ -643,14 +670,27 @@ def _matchad_produkt(ing: dict, sök, diet: str | None) -> dict | None:
             giltiga.append((p, ms if ms is not None else 100.0))
     if not giltiga:
         return None
-    # Default = bästa namnmatchen. Kampanj är BARA en tie-break bland kandidater
-    # som är nästan lika bra namnmatch (inom _KAMPANJ_MARGINAL) — annars skulle en
-    # nedsatt men sämre match vinna (morot→morotskaka).
-    bäst_p, bäst_score = giltiga[0]
+    # Re-ranka: föredra produkt där råvarans huvudord är produktens huvudord
+    # (heter/börjar med råvaran) framför ren delsträngsträff (ägg→äggvita,
+    # mjöl→mjölkdryck, is→islåda). Stabil sort → match_score-ordningen bevaras
+    # inom samma huvudord-nivå, och när ingen kandidat har en bättre huvudord-
+    # träff (alla 0) blir resultatet oförändrat = ofarlig fallback.
+    huvud = _ingrediens_huvudord(ing.get("namn", ""))
+    rankade = sorted(
+        ((p, score, _huvudord_poäng(p, huvud)) for p, score in giltiga),
+        key=lambda t: t[2], reverse=True,
+    )
+    # Default = bästa namnmatchen i den bästa huvudord-gruppen. Kampanj är BARA en
+    # tie-break bland kandidater med lika bra huvudord-träff OCH nästan lika bra
+    # namnmatch (inom _KAMPANJ_MARGINAL) — annars skulle en nedsatt men sämre/fel
+    # vara vinna (morot→morotskaka, ägg→äggvita).
+    bäst_p, bäst_score, bäst_huvud = rankade[0]
     val, val_besp = bäst_p, _aktuell_besparing(bäst_p)
-    for p, score in giltiga[1:]:
-        if score < bäst_score - _KAMPANJ_MARGINAL:
+    for p, score, hp in rankade[1:]:
+        if hp < bäst_huvud:
             break
+        if score < bäst_score - _KAMPANJ_MARGINAL:
+            continue
         besp = _aktuell_besparing(p)
         if besp > val_besp:
             val, val_besp = p, besp
