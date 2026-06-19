@@ -12,6 +12,9 @@ BackendPulsAr/bilder/
 BackendPulsAr/bilder_augmenterade/
 BackendPulsAr/data/clip_index.npz
 BackendPulsAr/data/pulsar.db
+# Runtime-data som servern skriver (divergerar per maskin → ska ej trackas)
+BackendPulsAr/data/butik_modell/butik_metadata.json
+BackendPulsAr/data/butik_modell/identifierade_produkter.json
 *.xcuserstate
 xcuserdata/
 DerivedData/
