@@ -670,24 +670,33 @@ def _matchad_produkt(ing: dict, sök, diet: str | None) -> dict | None:
             giltiga.append((p, ms if ms is not None else 100.0))
     if not giltiga:
         return None
-    # Re-ranka: föredra produkt där råvarans huvudord är produktens huvudord
-    # (heter/börjar med råvaran) framför ren delsträngsträff (ägg→äggvita,
-    # mjöl→mjölkdryck, is→islåda). Stabil sort → match_score-ordningen bevaras
-    # inom samma huvudord-nivå, och när ingen kandidat har en bättre huvudord-
-    # träff (alla 0) blir resultatet oförändrat = ofarlig fallback.
+    # Re-ranka kandidaterna på en (täckning, huvudord)-nyckel:
+    #  • täckning = hur många av RÅVARANS ord produkten har som helt ord — så att en
+    #    varietet som matchar hela råvaran ("Gul lök" för "gul lök") slår en annan
+    #    varietet som bara delar huvudordet ("Lök röd").
+    #  • huvudord = bryter delsträngs-biasen i fuzzy-sökningen (ägg→äggvita,
+    #    mjöl→mjölkdryck, is→islåda) när täckningen är lika.
+    # Stabil sort bevarar match_score-ordningen inom samma nyckel, och när ingen
+    # kandidat sticker ut (alla lika) blir resultatet oförändrat = ofarlig fallback.
     huvud = _ingrediens_huvudord(ing.get("namn", ""))
+    ing_ord = set(re.findall(r"[a-zåäö]+", (ing.get("namn", "") or "").lower()))
+
+    def _ranknyckel(p: dict) -> tuple[int, int]:
+        pord = set(re.findall(r"[a-zåäö]+", (p.get("namn") or "").lower()))
+        return (len(ing_ord & pord), _huvudord_poäng(p, huvud))
+
     rankade = sorted(
-        ((p, score, _huvudord_poäng(p, huvud)) for p, score in giltiga),
+        ((p, score, _ranknyckel(p)) for p, score in giltiga),
         key=lambda t: t[2], reverse=True,
     )
-    # Default = bästa namnmatchen i den bästa huvudord-gruppen. Kampanj är BARA en
-    # tie-break bland kandidater med lika bra huvudord-träff OCH nästan lika bra
+    # Default = bästa namnmatchen i den bästa rank-gruppen. Kampanj är BARA en
+    # tie-break bland kandidater med lika bra rank-nyckel OCH nästan lika bra
     # namnmatch (inom _KAMPANJ_MARGINAL) — annars skulle en nedsatt men sämre/fel
     # vara vinna (morot→morotskaka, ägg→äggvita).
-    bäst_p, bäst_score, bäst_huvud = rankade[0]
+    bäst_p, bäst_score, bäst_nyckel = rankade[0]
     val, val_besp = bäst_p, _aktuell_besparing(bäst_p)
-    for p, score, hp in rankade[1:]:
-        if hp < bäst_huvud:
+    for p, score, nyckel in rankade[1:]:
+        if nyckel < bäst_nyckel:
             break
         if score < bäst_score - _KAMPANJ_MARGINAL:
             continue
