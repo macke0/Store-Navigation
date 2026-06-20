@@ -20,6 +20,18 @@ except ImportError:
     USE_RAPIDFUZZ = False
 
 
+# Svenska böjnings-/plural-/bestämdhetsändelser. Om resten EFTER ett ord som
+# börjar med sökordet är en sån ändelse → samma ord böjt (tomat→tomater,
+# lök→lökar, ägg→äggen) → nästan exakt. Är resten NÅGOT annat bildar den ett
+# ANNAT ord (mjöl→mjöl+k=mjölk, is→is+låda) → mycket svagare. Ren längd räcker
+# inte: "k" är kort men gör mjöl→mjölk till en annan vara.
+_BÖJNINGS_SUFFIX = frozenset({
+    "", "s", "r", "n", "t", "a", "e",
+    "er", "ar", "or", "en", "et", "na", "as", "rs", "ns", "ts",
+    "ena", "erna", "arna", "orna",
+})
+
+
 def fuzzy_ratio(s1: str, s2: str) -> float:
     """
     Beräkna likhet mellan två strängar (0-100).
@@ -88,7 +100,15 @@ def fuzzy_ratio(s1: str, s2: str) -> float:
         if query_word == target_word:
             return 1.0 + position_bonus
         if target_word.startswith(query_word):
-            return 0.95 + position_bonus
+            rest = target_word[qlen:]
+            # Rest = böjningsändelse (tomat→tomater) → samma ord → nästan exakt.
+            # Annars är sökordet bara FÖRLED i ett ANNAT ord (mjöl→mjölk(dryck),
+            # is→islåda, ägg→äggvita) → mycket svagare, så att en suffix-
+            # sammansättning som FAKTISKT är en sorts varan (vetemjöl = en sorts
+            # mjöl, 0.85 nedan) rankas högre.
+            if rest in _BÖJNINGS_SUFFIX:
+                return 0.95 + position_bonus
+            return 0.6
         if qlen >= 4 and target_word.endswith(query_word):
             return 0.85
         if qlen >= 5 and query_word in target_word:
