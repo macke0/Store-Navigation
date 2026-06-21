@@ -90,7 +90,7 @@ def ladda_ner_bild(url: str, produkt_id: str) -> str:
     return ""
 
 def spara_csv(produkter: list[dict]):
-    fält = ["id", "visningsnamn", "varumarke", "kategori",
+    fält = ["id", "visningsnamn", "varumarke", "kategori", "avdelning",
             "pris", "enhetspris", "kampanjpris", "kampanjtext",
             "bild_url", "bild_lokal", "taggar"]
     ny = not os.path.exists(CSV_FIL)
@@ -289,7 +289,9 @@ def hämta_produkter(kategori_id: str, kategori_namn: str,
 
             fullt_namn = f"{märke} {namn}".strip() if märke and märke.lower() not in namn.lower() else namn
             prod_id    = slug(fullt_namn)
-            lövkategori = kategori_namn.split(" > ")[-1]
+            delar       = kategori_namn.split(" > ")
+            lövkategori = delar[-1]
+            avdelning   = delar[0]
 
             taggar = list(set(filter(None, [
                 lövkategori.lower(),
@@ -302,6 +304,7 @@ def hämta_produkter(kategori_id: str, kategori_namn: str,
                 "visningsnamn": fullt_namn,
                 "varumarke":    märke,
                 "kategori":     lövkategori,
+                "avdelning":    avdelning,
                 "pris":         pris,
                 "enhetspris":   enhetspris,
                 "kampanjpris":  kampanjpris,

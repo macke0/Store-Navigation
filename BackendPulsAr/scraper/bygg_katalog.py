@@ -34,6 +34,7 @@ def bygg():
             "namn":        r.get("visningsnamn", ""),
             "varumarke":   r.get("varumarke", ""),
             "kategori":    r.get("kategori", ""),
+            "avdelning":   r.get("avdelning", ""),
             "pris":        r.get("pris", ""),
             "enhetspris":  r.get("enhetspris", ""),
             "kampanjpris": r.get("kampanjpris", ""),
