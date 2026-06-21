@@ -108,14 +108,28 @@ def fuzzy_ratio(s1: str, s2: str) -> float:
             # mjöl, 0.85 nedan) rankas högre.
             if rest in _BÖJNINGS_SUFFIX:
                 return 0.95 + position_bonus
-            return 0.6
-        if qlen >= 4 and target_word.endswith(query_word):
-            return 0.85
-        if qlen >= 5 and query_word in target_word:
-            return 0.75
-        if query_word.startswith(target_word) and len(target_word) >= 4:
-            return 0.65 + position_bonus
-        return 0
+            branch = 0.6
+        elif qlen >= 4 and target_word.endswith(query_word):
+            branch = 0.85
+        elif qlen >= 5 and query_word in target_word:
+            branch = 0.75
+        elif query_word.startswith(target_word) and len(target_word) >= 4:
+            branch = 0.65 + position_bonus
+        else:
+            branch = 0.0
+
+        # Teckenlikhets-floor för LÅNGA enkelord (>=6 tecken båda). Fångar
+        # fogemorfem/stavningsvarianter som grenarna ovan missar HELT
+        # (granatäpplesirap↔granatäppelsirap 0.94 → annars 0; sammansatt
+        # kycklingbuljong[tärning] 0.81 → annars bara 0.65 och drunknar).
+        # Längd-grinden skyddar korta ord (mjöl↔mjölk 0.89 men 4 tecken →
+        # exkluderas → ingen återgång till mjöl→mjölk-buggen). Cap 0.9 så det
+        # aldrig läses som exakt match.
+        if qlen >= 6 and len(target_word) >= 6:
+            ratio = SequenceMatcher(None, query_word, target_word).ratio()
+            if ratio >= 0.80:
+                branch = max(branch, min(ratio, 0.9))
+        return branch
     
     # Räkna matchning för varje sökord
     word_scores = []
@@ -256,12 +270,18 @@ class ProduktSök:
         query = query.lower().strip()
         query_words = [w for w in query.split() if len(w) > 1]
         
-        # Kategorier som inte är matvaror eller fel för sökordet
+        # Kategorier som inte är matvaror eller fel för sökordet.
+        # OBS: använd SPECIFIKA termer, inte breda ord som "burk"/"ljus" som även
+        # finns i mat-kategorier ("Krydda, burk" = kryddor i burk, "Ljus choklad",
+        # "Ljust bröd") — annars begravs riktiga matvaror felaktigt.
         icke_mat_kategorier = [
             "rostar", "maskin", "korgar", "kannor", "knivar", "bestick",
             "tillbehör", "porslin", "glas ", "skålar", "formar", "köks",
-            "burk", "hyvel", "timer", "skärare", "kopp", "mått", "press",
-            "tvål", "silar", "trattar", "sikt", "dukar", "ljus", "värmeljus",
+            "förvaringsburk", "konserveringsburk", "hyvel", "timer", "skärare",
+            "kopp", "mått", "press",
+            "tvål", "silar", "trattar", "sikt", "dukar", "doftljus", "blockljus",
+            "tårtljus", "kronljus", "antikljus", "värmeljus", "ljussling",
+            "ljuslykt", "led-ljus",
             "rengöring", "diskmedel", "tvätt", "schampo", "balsam",
             "chips", "snacks", "godis", "chokladkaka"  # Inte bröd/mjölk
         ]
