@@ -609,13 +609,13 @@ def _aktuell_besparing(p: dict) -> float:
     return max(0.0, ord_pris - kampanj) if ord_pris is not None else 0.0
 
 
-# Kategorier (substräng på huvudkategorin) där en kampanjvara fritt kan ERSÄTTA
-# en annan i SAMMA kategori utan att rätten blir konstig: kött/fisk/pasta är
-# stapelvaror som byts mot varandra (pasta→pasta på rea, en fläskbit→veckans
-# nedsatta fläskbit). MEDVETET smal — grönsaker/mejeri/kryddor byts ALDRIG
-# (morot↔rabatterad rödbeta vore fel), så "byt till kampanjvara" sker bara där
-# det faktiskt är vettigt. Diet-/avledd-grindarna gäller fortfarande på bytet.
-_BYTBARA_KAT = (
+# Stapel-kategorier (substräng på huvudkategorin) där ALLA varianter är fritt
+# utbytbara mot varandra även om de inte delar något ord: pasta (penne↔spaghetti),
+# kött- och fiskstyckningar (fläskkarré↔fläskkotlett, lax↔torsk). Här räcker SAMMA
+# huvudkategori för ett byte. Övriga ingredienser kräver dessutom att kampanjvaran
+# delar råvarans HUVUDORD (gul lök→rödlök, potatis→färskpotatis) — så ett byte
+# aldrig blir konstigt (morot↛rabatterad rödbeta, äpple↛banan).
+_STAPEL_KAT = (
     "pasta", "fläsk", "gris", "nötkött", "kött", "färs", "korv", "chark",
     "kyckling", "fågel", "kalkon", "lamm", "fisk", "lax", "torsk", "skaldjur",
     "räkor",
@@ -643,18 +643,25 @@ def _kampanjindex(sök) -> dict:
 
 
 def _byt_till_kampanjvara(val: dict, sök, diet: str | None, ing_namn: str) -> dict:
-    """Byt den matchade produkten mot en KAMPANJVARA i samma huvudkategori om den
-    sparar mer — men bara i bytbara stapel-kategorier (kött/fisk/pasta). Så en
-    rätt med fläskkarré kan byggas på veckans nedsatta fläskbit, medan en morot
-    aldrig byts mot en rabatterad rödbeta. Behåller bästa namnmatchen om inget
-    billigare finns; diet-/avledd-grindarna gäller på den inbytta varan."""
+    """Byt den matchade produkten mot en KAMPANJVARA i SAMMA huvudkategori om den
+    sparar mer — för ALLA ingredienser, men bara när bytet är vettigt så rätten
+    inte blir konstig. Två godkända fall (utöver samma huvudkategori + diet-/
+    avledd-grind): (1) en stapel-kategori där alla varianter är utbytbara (kött/
+    fisk/pasta: fläskkarré→fläskfilé, penne→spaghetti), eller (2) kampanjvaran
+    delar råvarans HUVUDORD (gul lök→rödlök, potatis→färskpotatis). Annars hoppas
+    bytet över (morot↛rödbeta, äpple↛banan). Bästa namnmatchen behålls om inget
+    billigare passar."""
     huvudkat = _huvudkat(val.get("kategori", ""))
-    if not huvudkat or not any(o in huvudkat for o in _BYTBARA_KAT):
+    if not huvudkat:
         return val
+    stapel = any(o in huvudkat for o in _STAPEL_KAT)
+    huvud = _ingrediens_huvudord(ing_namn)
     bästa, bästa_besp = val, _aktuell_besparing(val)
     for kp in _kampanjindex(sök).get(huvudkat, []):
         if kp.get("id") == val.get("id") or not _giltig_kandidat(kp, diet, ing_namn):
             continue
+        if not stapel and _huvudord_poäng(kp, huvud) < 1:
+            continue                       # ej stapel + delar ej huvudord → konstigt byte
         besp = _aktuell_besparing(kp)
         if besp > bästa_besp:
             bästa, bästa_besp = kp, besp
@@ -757,8 +764,8 @@ def _matchad_produkt(ing: dict, sök, diet: str | None,
         besp = _aktuell_besparing(p)
         if besp > val_besp:
             val, val_besp = p, besp
-    # Kampanjläge: låt ingrediensen byta till en kampanjvara i samma stapel-
-    # kategori (kött/fisk/pasta) om det sparar mer → rätten BYGGS på veckans fynd.
+    # Kampanjläge: låt ingrediensen byta till en kampanjvara (alla ingredienser,
+    # vettig grind) om det sparar mer → rätten BYGGS på veckans fynd.
     if kampanj_läge:
         return _byt_till_kampanjvara(val, sök, diet, ing.get("namn", ""))
     return val
