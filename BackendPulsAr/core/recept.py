@@ -583,6 +583,17 @@ _AVLEDDA_KATEGORIER = (
     "marmelad", "sylt", "nudlar", "redning", "torkad lök", "sallad",
 )
 
+# Hela ICA-AVDELNINGAR (toppkategorin i sökvägen) som ALDRIG är en mat-ingrediens.
+# En råvara utan riktig katalogträff fuzzy-matchar annars skräp över _MIN_MATCH_SCORE
+# (sky→Mascara, kalvinnanlår→Kattmat, silverkulor→Ballong). Avdelning är en sluten
+# taxonomi → vetar generellt, inte per produkt. EXAKT-match (ej delsträng) eftersom
+# "Fisk & Skaldjur"/"Vegetariskt" är mat. Behåller medvetet Kök (folie/bakplåtspapper
+# matchar rätt), Grill, Träning & Återhämtning, Midsommar, Nyheter (mat/blandat).
+_NONFOOD_AVDELNINGAR = frozenset({
+    "Apotek, Hälsa & Skönhet", "Barn", "Blommor & Trädgård", "Djur", "Fritid",
+    "Hem & Inredning", "Kläder & Accessoarer", "Städ, Tvätt & Papper", "Tobak",
+})
+
 
 def _är_avledd_form(produkt: dict, ing_namn: str) -> bool:
     """True om produkten är en beredd/avledd form (kaka/juice/soppa/läsk...) av en
@@ -608,9 +619,11 @@ def _är_avledd_form(produkt: dict, ing_namn: str) -> bool:
 
 
 def _giltig_kandidat(p: dict | None, diet: str | None, ing_namn: str = "") -> bool:
-    """En kandidatprodukt är användbar om den finns, inte bryter mot dieten och
-    inte är en avledd form (kaka/juice/...) av en råvaru-ingrediens."""
-    return bool(p) and not _produkt_strider_mot_diet(p, diet) \
+    """En kandidatprodukt är användbar om den finns, inte tillhör en non-food-
+    avdelning, inte bryter mot dieten och inte är en avledd form (kaka/juice/...)
+    av en råvaru-ingrediens."""
+    return bool(p) and p.get("avdelning") not in _NONFOOD_AVDELNINGAR \
+        and not _produkt_strider_mot_diet(p, diet) \
         and not _är_avledd_form(p, ing_namn)
 
 
