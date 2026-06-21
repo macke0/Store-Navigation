@@ -655,17 +655,24 @@ def _byt_till_kampanjvara(val: dict, sök, diet: str | None, ing_namn: str) -> d
     fisk/pasta: fläskkarré→fläskfilé, penne→spaghetti), eller (2) kampanjvaran
     delar råvarans HUVUDORD (gul lök→rödlök, potatis→färskpotatis). Annars hoppas
     bytet över (morot↛rödbeta, äpple↛banan). Bästa namnmatchen behålls om inget
-    billigare passar."""
+    billigare passar.
+
+    Fri stapel-byte tillåts BARA om grundmatchen verkligen REPRESENTERAR råvaran
+    (råvaran är huvudordet i grundproduktens namn). Annars — svag/fel grundmatch
+    (t.ex. "rökt paprikapulver" som fastnat på en chark-produkt) — krävs att
+    kampanjvaran delar huvudordet, så ett byte inte förvärrar en redan fel match
+    (paprikapulver↛salsiccia)."""
     huvudkat = _huvudkat(val.get("kategori", ""))
     if not huvudkat:
         return val
-    stapel = any(o in huvudkat for o in _STAPEL_KAT)
     huvud = _ingrediens_huvudord(ing_namn)
+    stapel = any(o in huvudkat for o in _STAPEL_KAT)
+    fri_stapel = stapel and _huvudord_poäng(val, huvud) >= 2
     bästa, bästa_besp = val, _aktuell_besparing(val)
     for kp in _kampanjindex(sök).get(huvudkat, []):
         if kp.get("id") == val.get("id") or not _giltig_kandidat(kp, diet, ing_namn):
             continue
-        if not stapel and _huvudord_poäng(kp, huvud) < 1:
+        if not fri_stapel and _huvudord_poäng(kp, huvud) < 1:
             continue                       # ej stapel + delar ej huvudord → konstigt byte
         besp = _aktuell_besparing(kp)
         if besp > bästa_besp:
