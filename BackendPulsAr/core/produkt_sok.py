@@ -114,7 +114,19 @@ def fuzzy_ratio(s1: str, s2: str) -> float:
         elif qlen >= 5 and query_word in target_word:
             branch = 0.75
         elif query_word.startswith(target_word) and len(target_word) >= 4:
-            branch = 0.65 + position_bonus
+            # Sökordet är en sammansättning som BÖRJAR med produktordet
+            # (kycklingbuljongtärning ⊃ kycklingbuljong, vetemjöl ⊃ vete).
+            # Ju större del av sökordet produktordet täcker, desto starkare:
+            # produktnamnet är då HUVUDET i sammansättningen, inte ett kort
+            # gemensamt förled. "kyckling" (8/21=0.38) ska INTE rankas som
+            # "kycklingbuljong" (14/21=0.67) för "kycklingbuljongtärning".
+            täckning = len(target_word) / qlen
+            if täckning >= 0.6:
+                branch = 0.85
+            elif täckning >= 0.45:
+                branch = 0.72 + position_bonus
+            else:
+                branch = 0.65 + position_bonus
         else:
             branch = 0.0
 
@@ -383,10 +395,15 @@ class ProduktSök:
                         score += 8  # Bara bonus, inte sätt minimum
                         break
             
-            # Vanliga storlekar bonus
+            # Vanliga storlekar bonus (tie-breaker mellan likvärdiga namnträffar:
+            # 1kg-banan > 5kg-fruktpåse, 1l-mjölk > 0,2l-mjölk). EMPIRISKT TESTAT:
+            # +3 lät spurious storleksträffar slå rätt råvara (kycklingbuljongtärning
+            # → Kyckling nuggets 500g); +1 regresserade paketstorlek (banan →
+            # Fruktpåse 5kg). +2 = sweet spot: storlek skiljer fortfarande paket
+            # men kan inte längre slå ut en bättre namnträff (täcknings-grenen ovan).
             for storlek in vanliga_storlekar:
                 if storlek in namn:
-                    score += 3
+                    score += 2
                     break
             
             # Nedprioritera icke-mat
