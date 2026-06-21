@@ -472,7 +472,8 @@ def _flyt(värde) -> float | None:
         return None
 
 
-def _prissatt(recept: dict, sök, diet: str | None = None) -> tuple[float, float, float, int, int]:
+def _prissatt(recept: dict, sök, diet: str | None = None,
+              kampanj_läge: bool = False) -> tuple[float, float, float, int, int]:
     """(total, ordinarie, besparing, antal_kampanjvaror, antal_prissatta) från
     färska priser. antal_prissatta = ingredienser vi kunde sätta pris på, för att
     kunna räkna ut hur STOR ANDEL av korgen som är på kampanj. Produkter som
@@ -481,7 +482,7 @@ def _prissatt(recept: dict, sök, diet: str | None = None) -> tuple[float, float
     kampanjer = 0
     prissatta = 0
     for ing in recept.get("ingredienser", []):
-        p = _matchad_produkt(ing, sök, diet)
+        p = _matchad_produkt(ing, sök, diet, kampanj_läge)
         if not p:
             continue
         ord_pris = _flyt(p.get("pris"))
@@ -608,6 +609,58 @@ def _aktuell_besparing(p: dict) -> float:
     return max(0.0, ord_pris - kampanj) if ord_pris is not None else 0.0
 
 
+# Kategorier (substräng på huvudkategorin) där en kampanjvara fritt kan ERSÄTTA
+# en annan i SAMMA kategori utan att rätten blir konstig: kött/fisk/pasta är
+# stapelvaror som byts mot varandra (pasta→pasta på rea, en fläskbit→veckans
+# nedsatta fläskbit). MEDVETET smal — grönsaker/mejeri/kryddor byts ALDRIG
+# (morot↔rabatterad rödbeta vore fel), så "byt till kampanjvara" sker bara där
+# det faktiskt är vettigt. Diet-/avledd-grindarna gäller fortfarande på bytet.
+_BYTBARA_KAT = (
+    "pasta", "fläsk", "gris", "nötkött", "kött", "färs", "korv", "chark",
+    "kyckling", "fågel", "kalkon", "lamm", "fisk", "lax", "torsk", "skaldjur",
+    "räkor",
+)
+_kampanj_per_kat: dict | None = None
+
+
+def _huvudkat(kategori: str) -> str:
+    """Huvudkategori = första delen före komma ('Fläskkött, färsk' → 'fläskkött')."""
+    return (kategori or "").lower().split(",")[0].strip()
+
+
+def _kampanjindex(sök) -> dict:
+    """Uppslag huvudkategori → produkter på kampanj just nu (byggs en gång per
+    process; kampanjerna är desamma tills sortimentet laddas om vid omstart)."""
+    global _kampanj_per_kat
+    if _kampanj_per_kat is None:
+        idx: dict = {}
+        for p in sök.produkter:
+            if _flyt(p.get("kampanjpris")) is None:
+                continue
+            idx.setdefault(_huvudkat(p.get("kategori", "")), []).append(p)
+        _kampanj_per_kat = idx
+    return _kampanj_per_kat
+
+
+def _byt_till_kampanjvara(val: dict, sök, diet: str | None, ing_namn: str) -> dict:
+    """Byt den matchade produkten mot en KAMPANJVARA i samma huvudkategori om den
+    sparar mer — men bara i bytbara stapel-kategorier (kött/fisk/pasta). Så en
+    rätt med fläskkarré kan byggas på veckans nedsatta fläskbit, medan en morot
+    aldrig byts mot en rabatterad rödbeta. Behåller bästa namnmatchen om inget
+    billigare finns; diet-/avledd-grindarna gäller på den inbytta varan."""
+    huvudkat = _huvudkat(val.get("kategori", ""))
+    if not huvudkat or not any(o in huvudkat for o in _BYTBARA_KAT):
+        return val
+    bästa, bästa_besp = val, _aktuell_besparing(val)
+    for kp in _kampanjindex(sök).get(huvudkat, []):
+        if kp.get("id") == val.get("id") or not _giltig_kandidat(kp, diet, ing_namn):
+            continue
+        besp = _aktuell_besparing(kp)
+        if besp > bästa_besp:
+            bästa, bästa_besp = kp, besp
+    return bästa
+
+
 def _ingrediens_huvudord(namn: str) -> str:
     """Råvarans huvudord = sista alfabetiska ordet (svenska sammansättningar har
     substantivet sist: 'hel vitlök'→vitlök, 'riven prästost'→prästost)."""
@@ -635,7 +688,8 @@ def _huvudord_poäng(produkt: dict, huvud: str) -> int:
     return 0
 
 
-def _matchad_produkt(ing: dict, sök, diet: str | None) -> dict | None:
+def _matchad_produkt(ing: dict, sök, diet: str | None,
+                     kampanj_läge: bool = False) -> dict | None:
     """Den produkt en ingrediens ska prissättas/visas med — eller None. Sållar
     bort (a) skafferivaror (olja/salt/peppar), (b) för svaga fuzzy-träffar
     (skräpprodukter, < _MIN_MATCH_SCORE) och (c) produkter som bryter mot dieten.
@@ -703,6 +757,10 @@ def _matchad_produkt(ing: dict, sök, diet: str | None) -> dict | None:
         besp = _aktuell_besparing(p)
         if besp > val_besp:
             val, val_besp = p, besp
+    # Kampanjläge: låt ingrediensen byta till en kampanjvara i samma stapel-
+    # kategori (kött/fisk/pasta) om det sparar mer → rätten BYGGS på veckans fynd.
+    if kampanj_läge:
+        return _byt_till_kampanjvara(val, sök, diet, ing.get("namn", ""))
     return val
 
 
@@ -880,13 +938,13 @@ def _bild_url(recept: dict) -> str:
 
 def _till_matratt(recept: dict, sök, produkt_db: dict,
                   total: float, ordinarie: float, besparing: float,
-                  diet: str | None = None) -> dict:
+                  diet: str | None = None, kampanj_läge: bool = False) -> dict:
     ingredienser = []
     for ing in recept.get("ingredienser", []):
         # Samma grind som prissättningen: dölj skafferivaror, svaga fuzzy-träffar
         # och produkter som bryter mot dieten (olja→babyolja, peppar→pepparbiff,
         # kött i veg-rätt) → de visas som omatchade i inköpslistan.
-        p = _matchad_produkt(ing, sök, diet)
+        p = _matchad_produkt(ing, sök, diet, kampanj_läge)
         pid = p.get("id") if p else None
         pos = produkt_db.get(pid) or {}
         mangd = " ".join(filter(None, [ing.get("mangd", ""), ing.get("enhet", "")])).strip() \
@@ -947,6 +1005,10 @@ def sok_recept(meddelande: str, karta: str = "hela_butiken",
     max_tid = filt.get("max_tid_min")
     önskad_svårighet = filt.get("svårighet")
     vill_efterrätt = bool(filt.get("vill_efterrätt_dryck"))
+    # I kampanjläget får varje ingrediens byta till en kampanjvara i samma
+    # stapel-kategori (kött/fisk/pasta) → priser, ranking OCH inköpslista byggs
+    # på veckans fynd. Påverkar inga andra sorteringar.
+    kampanj_läge = (filt.get("sortering") == "kampanj")
 
     scored: list[dict] = []
     for r in recept:
@@ -973,7 +1035,7 @@ def sok_recept(meddelande: str, karta: str = "hela_butiken",
         # avancerade (recept med okänd tid/steg hamnar i "medel" → utesluts då).
         if önskad_svårighet and _svårighet(r) != önskad_svårighet:
             continue
-        total, ordinarie, besparing, kampanjer, prissatta = _prissatt(r, sök, diet)
+        total, ordinarie, besparing, kampanjer, prissatta = _prissatt(r, sök, diet, kampanj_läge)
         # Inget matchat = tom inköpslista → värdelös träff i kund-flödet.
         if prissatta == 0:
             continue
@@ -1008,7 +1070,7 @@ def sok_recept(meddelande: str, karta: str = "hela_butiken",
     topp = scored[:antal] if med else _diversifiera(scored, antal)
     matratter = [
         _till_matratt(s["recept"], sök, produkt_db,
-                      s["total"], s["ordinarie"], s["besparing"], diet)
+                      s["total"], s["ordinarie"], s["besparing"], diet, kampanj_läge)
         for s in topp
     ]
     return {"matratter": matratter}
