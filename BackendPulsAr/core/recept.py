@@ -507,8 +507,13 @@ def _kampanjpoäng(besparing: float, ordinarie: float, kampanjer: int,
     if ordinarie <= 0:
         return 0.0
     relativ = besparing / ordinarie                  # 0..1, "billigare än vanligt"
-    täckning = kampanjer / max(antal_prissatta, 1)    # 0..1, kombinerar flera fynd
-    return (relativ * 60) + (täckning * 25) + min(besparing, 60) * 0.4 - min(total, 250) * 0.03
+    # Täckning mäts mot en MÅLTIDSGOLV (minst 3 varor) så ett recept där bara EN
+    # vara matchat (och råkar vara på rea) inte får full täckning = 1.0 och toppar.
+    täckning = kampanjer / max(antal_prissatta, 3)    # 0..1, kombinerar flera fynd
+    # Belöna ANTALET kombinerade fynd absolut → en måltid byggd på flera kampanj-
+    # varor slår en tunn rätt där enbart smör är på rea.
+    flera_fynd = min(kampanjer, 5) * 5
+    return (relativ * 60) + (täckning * 25) + flera_fynd + min(besparing, 60) * 0.4 - min(total, 250) * 0.03
 
 
 def _är_skafferi(ing_namn: str) -> bool:
@@ -1049,6 +1054,7 @@ def sok_recept(meddelande: str, karta: str = "hela_butiken",
         scored.append({
             "recept": r, "total": total, "ordinarie": ordinarie,
             "besparing": besparing, "kampanjer": kampanjer,
+            "prissatta": prissatta,
             "proteinkälla": _proteinkälla(r),
             "kampanjpoäng": _kampanjpoäng(besparing, ordinarie, kampanjer,
                                           prissatta, total),
@@ -1061,13 +1067,15 @@ def sok_recept(meddelande: str, karta: str = "hela_butiken",
     # annars skulle oprissatta recept (total=0) felaktigt hamna överst.
     if sortering == "billigt":
         scored = [s for s in scored if s["total"] > 0]
-    # "Kampanj": kunden vill ha rätter BYGGDA på kampanjvaror → kräv minst en
-    # kampanjvara OCH att hela måltiden blir märkbart billigare än vanligt (en
-    # 2%-rabatt är ingen kampanjmåltid).
+    # "Kampanj": kunden vill ha rätter BYGGDA på kampanjvaror → kräv en RIKTIG
+    # måltid (minst 3 prissatta varor) som kombinerar MINST TVÅ kampanjfynd och
+    # blir märkbart billigare än vanligt. Annars toppar tunna rätter där bara en
+    # skafferivara (t.ex. smör) råkar vara på rea.
     elif sortering == "kampanj":
         scored = [
             s for s in scored
-            if s["total"] > 0 and s["kampanjer"] > 0 and s["ordinarie"] > 0
+            if s["total"] > 0 and s["prissatta"] >= 3 and s["kampanjer"] >= 2
+            and s["ordinarie"] > 0
             and s["besparing"] / s["ordinarie"] >= _MIN_KAMPANJANDEL
         ]
 
