@@ -593,6 +593,15 @@ def _är_avledd_form(produkt: dict, ing_namn: str) -> bool:
     namn = (produkt.get("namn") or "").lower()
     kat = (produkt.get("kategori") or "").lower()
     ing = (ing_namn or "").lower()
+    # Ingrediensen bad UTTRYCKLIGEN om just den här produkten: alla ingrediens-ord
+    # finns i produktnamnet OCH produktnamnets första ord finns i ingrediensen →
+    # råvaran ÄR den efterfrågade, inte en avledd form. Fångar t.ex. ingrediens
+    # "rostad lök" → produkt "Rostad lök" trots hyllkategorin "Torkad lök", men
+    # släpper INTE igenom "lök" → "Rostad lök" (då saknas "rostad" i ingrediensen).
+    ing_ord = set(re.findall(r"[a-zåäö]+", ing))
+    namn_ord = re.findall(r"[a-zåäö]+", namn)
+    if ing_ord and namn_ord and ing_ord <= set(namn_ord) and namn_ord[0] in ing_ord:
+        return False
     if any(k in kat and k.strip() not in ing for k in _AVLEDDA_KATEGORIER):
         return True
     return any(f in namn and f not in ing for f in _AVLEDDA_FORMER)
