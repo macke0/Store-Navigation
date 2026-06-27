@@ -249,11 +249,19 @@ def _matcha_namn_chunk(namn_lista: list[str]) -> dict[str, list[dict]]:
     sök = get_produkt_sök()
     ut: dict[str, list[dict]] = {}
     for namn in namn_lista:
-        # Top-12 (inte 5): form-vetot (_är_avledd_form) kan såll bort flera avledda
-        # toppträffar (morot → morotsjuice/-soppa/-kaka...) innan den rena råvaran
-        # ("Morot knippe") dyker upp — den ligger ofta först bortom plats 5.
-        träffar = sök.sök(_rensa_ingrediensnamn(namn) or namn, 12)
-        ut[namn] = [{"id": t.get("id"), "score": t.get("match_score")} for t in träffar]
+        # Sök på FLERA termer (helnamn + alternativ + huvudord, se _sök_termer) och
+        # UNIONa kandidaterna: så 'finskuren gräslök'/'smör till stekning'/'smör
+        # eller margarin' ändå hittar råvaran utan ordlista. Top-12 (inte 5):
+        # form-vetot (_är_avledd_form) kan såll bort flera avledda toppträffar
+        # (morot → morotsjuice/-soppa/-kaka...) innan den rena råvaran dyker upp.
+        bäst: dict[str, float] = {}
+        for term in _sök_termer(namn):
+            for t in sök.sök(term, 12):
+                pid, score = t.get("id"), t.get("match_score") or 0.0
+                if pid is not None and score > bäst.get(pid, -1.0):
+                    bäst[pid] = score
+        topp = sorted(bäst.items(), key=lambda kv: kv[1], reverse=True)[:12]
+        ut[namn] = [{"id": pid, "score": score} for pid, score in topp]
     return ut
 
 
@@ -716,22 +724,49 @@ _ING_MÄNGDORD = re.compile(
     r"påse|påsar|knippe|knippen|bunt|buntar|nypa|stänk|skvätt)\b")
 _ING_KVALIFICERARE = re.compile(
     r"\b(?:med|utan)\s+(?:skinn|ben|kärnor)\b|\b(?:urkärnad|i bitar|i klyftor|i skivor)\b")
+# "smör till stekning" / "olja till formen" / "ägg till pensling" → råvaran;
+# tillagnings-/serverings-svans bär ingen produktidentitet.
+_ING_TILL = re.compile(r"\btill\s+.*$")
+_ING_FILLER = re.compile(r"\b(?:ev|gärna|förslagsvis|t\s*ex)\b")
+# Alternativ-separatorer (eller/alt/alternativt//) → matcha varje för sig.
+_ALT_SEP = re.compile(r"\s+(?:eller|alt|alternativt)\s+|\s*/\s*")
 
 
 def _rensa_ingrediensnamn(namn: str) -> str:
-    """Ta bort mängd/enhet/parentes/behållar-brus ur ett ingrediens-namn så
+    """Ta bort mängd/enhet/parentes/behållar-/svans-brus ur ett ingrediens-namn så
     matchningen ser RÅVARAN: 'ankbröst (à 600 g)'->'ankbröst', 'förp
-    ankbröst'->'ankbröst', 'citron (rivet skal och saft)'->'citron'. 'alt/eller'
-    lämnas kvar (huvudordet kan komma EFTER, t.ex. 'hackad eller smält
-    mjölkchoklad') → fuzzy-matchningen väljer den starkaste. Visningsnamnet
-    (namn_ingrediens) lämnas orört."""
+    ankbröst'->'ankbröst', 'citron (rivet skal och saft)'->'citron', 'smör till
+    stekning'->'smör'. 'alt/eller' lämnas kvar (huvudordet kan komma EFTER, t.ex.
+    'hackad eller smält mjölkchoklad') → fuzzy-matchningen väljer den starkaste.
+    Visningsnamnet (namn_ingrediens) lämnas orört."""
     s = (namn or "").lower()
     s = _ING_PARENTES.sub(" ", s)
+    s = _ING_TILL.sub(" ", s)
     s = _ING_TAL_ENHET.sub(" ", s)
     s = _ING_MÄNGDORD.sub(" ", s)
     s = _ING_KVALIFICERARE.sub(" ", s)
+    s = _ING_FILLER.sub(" ", s)
     s = re.sub(r"[^a-zåäö\s]", " ", s)
     return re.sub(r"\s+", " ", s).strip()
+
+
+def _sök_termer(namn: str) -> list[str]:
+    """Sökord för en ingrediens vid index-matchning: rensat helnamn + varje
+    alternativ (eller/alt//) + HUVUDORDET (sista alfaordet). Så prep-/behållar-
+    brus ('finskuren gräslök'→gräslök, 'knippa dill'→dill, 'smör eller
+    margarin'→smör+margarin) ändå hittar råvaran, utan ordlista. Helnamnet ligger
+    kvar först → produktvarianter ('rostad lök'→Rostad lök) finns bland kandidat-
+    erna och vinner på täcknings-/huvudord-omrankningen vid körning."""
+    rensat = _rensa_ingrediensnamn(namn) or (namn or "").lower().strip()
+    termer = [rensat]
+    for del_ in _ALT_SEP.split(rensat):
+        del_ = del_.strip()
+        if del_ and del_ not in termer:
+            termer.append(del_)
+    ord_ = re.findall(r"[a-zåäö]+", rensat)
+    if ord_ and ord_[-1] not in termer:
+        termer.append(ord_[-1])
+    return termer
 
 
 def _unika_ingredienser(recept: dict) -> list[dict]:
