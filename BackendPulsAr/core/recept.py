@@ -1043,6 +1043,97 @@ def _bild_url(recept: dict) -> str:
     return recept.get("bild_url") or ""
 
 
+# ── Åtgång/rest: hur mycket av en köpt förpackning receptet faktiskt använder ──
+# Recept anger fri-text-mängd ("2 dl", "200 g", "1 1/2 dl"); produktnamnet bär
+# förpackningsstorleken ("Olivolja 500ml", "Färs 500g", "Ägg 20-p"). När båda
+# går att tolka i SAMMA dimension (vikt/volym/antal) räknar vi ut hur många
+# förpackningar man behöver + hur mycket som blir över efter matlagningen.
+_VIKT = {"g": 1.0, "gram": 1.0, "hg": 100.0, "kg": 1000.0}
+_VOLYM = {"ml": 1.0, "cl": 10.0, "dl": 100.0, "l": 1000.0, "liter": 1000.0,
+          "msk": 15.0, "tsk": 5.0, "krm": 1.0}
+_ANTAL = {"st": 1.0, "styck": 1.0, "stycken": 1.0}
+_FRAK = {"½": 0.5, "¼": 0.25, "¾": 0.75, "⅓": 1 / 3, "⅔": 2 / 3, "⅛": 0.125}
+
+
+def _enhet_dim(enhet: str):
+    if enhet in _VIKT:  return "vikt", _VIKT[enhet]
+    if enhet in _VOLYM: return "volym", _VOLYM[enhet]
+    if enhet in _ANTAL: return "antal", _ANTAL[enhet]
+    return None, None
+
+
+def _parsa_tal(s: str):
+    """'2', '2,5', '1/2', '2 1/2', '½' → float (None om ej tal)."""
+    s = (s or "").strip()
+    for f, v in _FRAK.items():
+        s = s.replace(f, f" {v} ")
+    s = s.strip()
+    m = re.match(r"^(\d+)\s+(\d+)\s*/\s*(\d+)$", s)          # "2 1/2"
+    if m: return int(m.group(1)) + int(m.group(2)) / int(m.group(3))
+    m = re.match(r"^(\d+)\s*/\s*(\d+)$", s)                  # "1/2"
+    if m: return int(m.group(1)) / int(m.group(2))
+    m = re.match(r"^(\d+(?:[.,]\d+)?)(?:\s+(\d+(?:[.,]\d+)?))?$", s)  # "2", "2,5", "2 5"
+    if m:
+        tot = float(m.group(1).replace(",", "."))
+        if m.group(2): tot += float(m.group(2).replace(",", "."))
+        return tot
+    return None
+
+
+def _parsa_mängd(text: str):
+    """Receptmängd → (mängd_i_basenhet, dim) annars (None, None)."""
+    t = (text or "").lower().strip()
+    m = re.search(r"([\d.,/\s½¼¾⅓⅔⅛]+?)\s*"
+                  r"(kg|hg|gram|g|ml|cl|dl|liter|l|msk|tsk|krm|st|styck|stycken)\b", t)
+    if not m: return None, None
+    tal = _parsa_tal(m.group(1))
+    if tal is None: return None, None
+    dim, faktor = _enhet_dim(m.group(2))
+    if not dim: return None, None
+    return tal * faktor, dim
+
+
+def _paket_storlek(namn: str):
+    """Förpackningsstorlek ur produktnamn → (storlek_i_basenhet, dim) annars (None, None).
+    'Olivolja 500ml'→(500,volym), 'Färs 500g'→(500,vikt), 'Ägg 20-p'→(20,antal)."""
+    t = (namn or "").lower()
+    bästa = None
+    for m in re.finditer(r"(\d+(?:[.,]\d+)?)\s*(kg|hg|ml|cl|dl|liter|l|g)\b", t):
+        tal = float(m.group(1).replace(",", "."))
+        dim, faktor = _enhet_dim(m.group(2))
+        if dim: bästa = (tal * faktor, dim)   # sista/mest specifika storleken vinner
+    if bästa: return bästa
+    m = re.search(r"(\d+)\s*-?\s*p\b", t)      # "20-p", "12 p"
+    if m: return float(m.group(1)), "antal"
+    return None, None
+
+
+def _fmt_mängd(bas: float, dim: str) -> str:
+    if dim == "vikt":
+        return f"{bas / 1000:g} kg" if bas >= 1000 else f"{int(round(bas))} g"
+    if dim == "volym":
+        if bas >= 1000: return f"{bas / 1000:g} l"
+        if bas >= 100 and bas % 100 == 0: return f"{int(bas / 100)} dl"
+        return f"{int(round(bas))} ml"
+    return f"{int(round(bas))} st"
+
+
+def _åtgång(mangd: str, produktnamn: str) -> dict | None:
+    """{antal_paket, rest, paket} om recept-mängd och förpackning går att jämföra
+    i samma dimension, annars None. rest = vad som blir kvar efter matlagningen."""
+    åt, d1 = _parsa_mängd(mangd)
+    pak, d2 = _paket_storlek(produktnamn)
+    if åt is None or pak is None or d1 != d2 or pak <= 0:
+        return None
+    antal = max(1, math.ceil(åt / pak))
+    rest = antal * pak - åt
+    return {
+        "antal_paket": antal,
+        "paket":       _fmt_mängd(pak, d2),
+        "rest":        _fmt_mängd(rest, d2) if rest > 0 else None,
+    }
+
+
 def _till_matratt(recept: dict, sök, produkt_db: dict,
                   total: float, ordinarie: float, besparing: float,
                   diet: str | None = None, kampanj_läge: bool = False) -> dict:
@@ -1056,6 +1147,7 @@ def _till_matratt(recept: dict, sök, produkt_db: dict,
         pos = produkt_db.get(pid) or {}
         mangd = " ".join(filter(None, [ing.get("mangd", ""), ing.get("enhet", "")])).strip() \
             or ing.get("text", "")
+        åtg = _åtgång(mangd, p.get("namn", "")) if p else None
         ingredienser.append({
             "produkt_id":      pid if p else None,
             "namn_ingrediens": ing.get("namn", ""),
@@ -1071,6 +1163,9 @@ def _till_matratt(recept: dict, sök, produkt_db: dict,
             "z":               pos.get("z"),
             "matchad":         bool(p),
             "skafferi":        _är_skafferi(ing.get("namn", "")),
+            "antal_paket":     åtg["antal_paket"] if åtg else None,
+            "paket":           åtg["paket"] if åtg else None,
+            "rest":            åtg["rest"] if åtg else None,
         })
     näring = recept.get("naring") or {}
     return {
