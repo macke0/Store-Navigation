@@ -252,7 +252,7 @@ def _matcha_namn_chunk(namn_lista: list[str]) -> dict[str, list[dict]]:
         # Top-12 (inte 5): form-vetot (_är_avledd_form) kan såll bort flera avledda
         # toppträffar (morot → morotsjuice/-soppa/-kaka...) innan den rena råvaran
         # ("Morot knippe") dyker upp — den ligger ofta först bortom plats 5.
-        träffar = sök.sök(namn, 12)
+        träffar = sök.sök(_rensa_ingrediensnamn(namn) or namn, 12)
         ut[namn] = [{"id": t.get("id"), "score": t.get("match_score")} for t in träffar]
     return ut
 
@@ -481,7 +481,7 @@ def _prissatt(recept: dict, sök, diet: str | None = None,
     total = ordinarie = 0.0
     kampanjer = 0
     prissatta = 0
-    for ing in recept.get("ingredienser", []):
+    for ing in _unika_ingredienser(recept):
         p = _matchad_produkt(ing, sök, diet, kampanj_läge)
         if not p:
             continue
@@ -702,6 +702,51 @@ def _byt_till_kampanjvara(val: dict, sök, diet: str | None, ing_namn: str) -> d
     return bästa
 
 
+# Brus i ingrediensnamn som stör fuzzy-matchningen mot sortimentet. Vi tar bort
+# mängd/enhet/parentes/behållarord/alternativ — men INTE adjektiv/particip som kan
+# definiera en egen produkt (rostad lök, torkad lök, riven ost) → de lämnas orörda.
+_ING_PARENTES = re.compile(r"\([^)]*\)")
+_ING_ALT = re.compile(r"\b(?:alt|alternativt|eller)\b.*$")
+_ING_TAL_ENHET = re.compile(r"\b\d+[\d.,/]*\s*(?:g|kg|hg|dl|cl|ml|l|msk|tsk|krm|st|pkt|förp)?\b")
+_ING_MÄNGDORD = re.compile(
+    r"\b(?:à|ca|cirka|ungefär|drygt|knappt|förp|förpackning|paket|pkt|burk|burkar|"
+    r"påse|påsar|knippe|knippen|bunt|buntar|nypa|stänk|skvätt)\b")
+_ING_KVALIFICERARE = re.compile(
+    r"\b(?:med|utan)\s+(?:skinn|ben|kärnor)\b|\b(?:urkärnad|i bitar|i klyftor|i skivor)\b")
+
+
+def _rensa_ingrediensnamn(namn: str) -> str:
+    """Ta bort mängd/enhet/parentes/behållar-/alternativ-brus ur ett ingrediens-
+    namn så matchningen ser RÅVARAN: 'ankbröst (à 600 g)'->'ankbröst', 'förp
+    ankbröst'->'ankbröst', 'olivolja alt rapsolja'->'olivolja', 'citron (rivet skal
+    och saft)'->'citron'. Visningsnamnet (namn_ingrediens) lämnas orört."""
+    s = (namn or "").lower()
+    s = _ING_PARENTES.sub(" ", s)
+    s = _ING_ALT.sub(" ", s)
+    s = _ING_TAL_ENHET.sub(" ", s)
+    s = _ING_MÄNGDORD.sub(" ", s)
+    s = _ING_KVALIFICERARE.sub(" ", s)
+    s = re.sub(r"[^a-zåäö\s]", " ", s)
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def _unika_ingredienser(recept: dict) -> list[dict]:
+    """Receptingredienser med dubbletter borttagna. Samma råvara listas ofta i
+    flera tillagningssteg (olivolja till stekning + till dressing, smör i deg +
+    till stekning) — för en inköpslista räcker EN post, och priset ska inte
+    dubbelräknas. Nyckel = rensat namn så 'olivolja' och 'olivolja 500ml' slås
+    ihop; första förekomsten (med sin mängd) behålls."""
+    sedda: set[str] = set()
+    ut: list[dict] = []
+    for ing in recept.get("ingredienser", []):
+        nyckel = _rensa_ingrediensnamn(ing.get("namn", "")) or (ing.get("namn") or "").lower().strip()
+        if nyckel in sedda:
+            continue
+        sedda.add(nyckel)
+        ut.append(ing)
+    return ut
+
+
 def _ingrediens_huvudord(namn: str) -> str:
     """Råvarans huvudord = sista alfabetiska ordet (svenska sammansättningar har
     substantivet sist: 'hel vitlök'→vitlök, 'riven prästost'→prästost)."""
@@ -753,6 +798,9 @@ def _matchad_produkt(ing: dict, sök, diet: str | None,
     if _är_skafferi(ing.get("namn", "")):
         return None
 
+    # Matcha mot RÅVARAN, inte mängd/parentes/kvalificerare ("ankbröst (à 600 g)").
+    rensat = _rensa_ingrediensnamn(ing.get("namn", "")) or ing.get("namn", "")
+
     kandidater = ing.get("produkt_kandidater")
     if kandidater is None:
         # Äldre index utan kandidatlista → fall tillbaka på enskild top-1-träff.
@@ -763,7 +811,7 @@ def _matchad_produkt(ing: dict, sök, diet: str | None,
         if not pid:
             return None
         p = sök.id_index.get(pid)
-        return p if _giltig_kandidat(p, diet, ing.get("namn", "")) else None
+        return p if _giltig_kandidat(p, diet, rensat) else None
 
     # Nytt index: top-N kandidater. Behåll bara de tillräckligt starka och
     # diet-giltiga (kandidaterna kommer sorterade fallande på match_score från sök).
@@ -773,7 +821,7 @@ def _matchad_produkt(ing: dict, sök, diet: str | None,
         if ms is not None and ms < _MIN_MATCH_SCORE:
             continue
         p = sök.id_index.get(k.get("id"))
-        if _giltig_kandidat(p, diet, ing.get("namn", "")):
+        if _giltig_kandidat(p, diet, rensat):
             giltiga.append((p, ms if ms is not None else 100.0))
     if not giltiga:
         return None
@@ -785,8 +833,8 @@ def _matchad_produkt(ing: dict, sök, diet: str | None,
     #    mjöl→mjölkdryck, is→islåda) när täckningen är lika.
     # Stabil sort bevarar match_score-ordningen inom samma nyckel, och när ingen
     # kandidat sticker ut (alla lika) blir resultatet oförändrat = ofarlig fallback.
-    huvud = _ingrediens_huvudord(ing.get("namn", ""))
-    ing_ord = set(re.findall(r"[a-zåäö]+", (ing.get("namn", "") or "").lower()))
+    huvud = _ingrediens_huvudord(rensat)
+    ing_ord = set(re.findall(r"[a-zåäö]+", rensat.lower()))
 
     def _ranknyckel(p: dict) -> tuple[int, int]:
         pord = set(re.findall(r"[a-zåäö]+", (p.get("namn") or "").lower()))
@@ -983,8 +1031,10 @@ def _svårighet(recept: dict) -> str:
 # ─────────────────────────────────────────────
 
 def _bild_url(recept: dict) -> str:
+    # Spegla lokalt BARA om filen faktiskt finns på disk (static/ kan ha rensats);
+    # annars hotlinka ICA:s CDN (bild_url finns alltid i recept-datan).
     lokal = recept.get("bild_lokal")
-    if lokal:
+    if lokal and os.path.exists(lokal.lstrip("/")):
         return f"{_BAS_URL}{lokal}" if lokal.startswith("/") else lokal
     return recept.get("bild_url") or ""
 
@@ -993,7 +1043,7 @@ def _till_matratt(recept: dict, sök, produkt_db: dict,
                   total: float, ordinarie: float, besparing: float,
                   diet: str | None = None, kampanj_läge: bool = False) -> dict:
     ingredienser = []
-    for ing in recept.get("ingredienser", []):
+    for ing in _unika_ingredienser(recept):
         # Samma grind som prissättningen: dölj skafferivaror, svaga fuzzy-träffar
         # och produkter som bryter mot dieten (olja→babyolja, peppar→pepparbiff,
         # kött i veg-rätt) → de visas som omatchade i inköpslistan.
@@ -1016,6 +1066,7 @@ def _till_matratt(recept: dict, sök, produkt_db: dict,
             "y":               pos.get("y"),
             "z":               pos.get("z"),
             "matchad":         bool(p),
+            "skafferi":        _är_skafferi(ing.get("namn", "")),
         })
     näring = recept.get("naring") or {}
     return {
