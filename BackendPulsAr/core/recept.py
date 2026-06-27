@@ -706,7 +706,6 @@ def _byt_till_kampanjvara(val: dict, sök, diet: str | None, ing_namn: str) -> d
 # mängd/enhet/parentes/behållarord/alternativ — men INTE adjektiv/particip som kan
 # definiera en egen produkt (rostad lök, torkad lök, riven ost) → de lämnas orörda.
 _ING_PARENTES = re.compile(r"\([^)]*\)")
-_ING_ALT = re.compile(r"\b(?:alt|alternativt|eller)\b.*$")
 _ING_TAL_ENHET = re.compile(r"\b\d+[\d.,/]*\s*(?:g|kg|hg|dl|cl|ml|l|msk|tsk|krm|st|pkt|förp)?\b")
 _ING_MÄNGDORD = re.compile(
     r"\b(?:à|ca|cirka|ungefär|drygt|knappt|förp|förpackning|paket|pkt|burk|burkar|"
@@ -716,13 +715,14 @@ _ING_KVALIFICERARE = re.compile(
 
 
 def _rensa_ingrediensnamn(namn: str) -> str:
-    """Ta bort mängd/enhet/parentes/behållar-/alternativ-brus ur ett ingrediens-
-    namn så matchningen ser RÅVARAN: 'ankbröst (à 600 g)'->'ankbröst', 'förp
-    ankbröst'->'ankbröst', 'olivolja alt rapsolja'->'olivolja', 'citron (rivet skal
-    och saft)'->'citron'. Visningsnamnet (namn_ingrediens) lämnas orört."""
+    """Ta bort mängd/enhet/parentes/behållar-brus ur ett ingrediens-namn så
+    matchningen ser RÅVARAN: 'ankbröst (à 600 g)'->'ankbröst', 'förp
+    ankbröst'->'ankbröst', 'citron (rivet skal och saft)'->'citron'. 'alt/eller'
+    lämnas kvar (huvudordet kan komma EFTER, t.ex. 'hackad eller smält
+    mjölkchoklad') → fuzzy-matchningen väljer den starkaste. Visningsnamnet
+    (namn_ingrediens) lämnas orört."""
     s = (namn or "").lower()
     s = _ING_PARENTES.sub(" ", s)
-    s = _ING_ALT.sub(" ", s)
     s = _ING_TAL_ENHET.sub(" ", s)
     s = _ING_MÄNGDORD.sub(" ", s)
     s = _ING_KVALIFICERARE.sub(" ", s)
