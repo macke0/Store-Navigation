@@ -32,7 +32,7 @@ from pathlib import Path
 
 import anthropic
 
-from core.produkt_sok import get_produkt_sök
+from core.produkt_sok import get_produkt_sök, _BÖJNINGS_SUFFIX
 from core.produkt_skanning import läs_konsoliderade
 
 client = anthropic.Anthropic()
@@ -726,6 +726,18 @@ def _huvudord_poäng(produkt: dict, huvud: str) -> int:
         return 2
     if any(o.endswith(huvud) and len(o) > len(huvud) for o in ord):
         return 1
+    # Råvaran är en SAMMANSÄTTNING/böjning vars BAS är produktnamnets huvudord
+    # (citronsaft→Citron, limesaft→Lime, citroner→Citron, vitlöksklyfta→Vitlök):
+    # produktens första ord är ett prefix-rot av huvudordet OCH resten är antingen
+    # en böjning (-er/-ar...) eller ett eget morfem (>=3 tecken). Skiljer rätt
+    # citron⊂citronsaft från fel mjöl⊂mjölk ('k' är varken böjning eller morfem) —
+    # så en kampanjvara som bara råkar ha råvaran som icke-huvudord (lax m. citron)
+    # inte fäller den faktiska basvaran via kampanj-tie-breaken.
+    bas = ord[0]
+    if len(bas) >= 4 and huvud.startswith(bas) and len(huvud) > len(bas):
+        rest = huvud[len(bas):]
+        if rest in _BÖJNINGS_SUFFIX or len(rest) >= 3:
+            return 1
     return 0
 
 
