@@ -518,8 +518,12 @@ def _kampanjpoäng(besparing: float, ordinarie: float, kampanjer: int,
 
 def _är_skafferi(ing_namn: str) -> bool:
     """True om ingrediensen är en skafferivara (salt/peppar/vatten/olja/socker)
-    som inte ska matchas mot sortimentet — undviker skräpträffar + listbrus."""
-    return (ing_namn or "").lower().strip() in _SKAFFERI
+    som inte ska matchas mot sortimentet — undviker skräpträffar + listbrus.
+    Kollar både rå- och rensat namn ('olja (till formen)' → 'olja')."""
+    rå = (ing_namn or "").lower().strip()
+    if rå in _SKAFFERI:
+        return True
+    return _rensa_ingrediensnamn(ing_namn) in _SKAFFERI
 
 
 def _produkt_strider_mot_diet(produkt: dict, diet: str | None) -> bool:
