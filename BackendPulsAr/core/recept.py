@@ -76,7 +76,8 @@ _INBÄDDAD_FISK = ("sill", "räk", "lax", "torsk", "makrill", "sardin", "kräft"
 _EJ_MÅLTID = {
     "efterrätt", "dessert", "glass", "sorbet", "tårta", "bakelse", "kladdkaka",
     "cheesecake", "muffins", "cupcake", "godis", "fika", "fikabröd", "kakor",
-    "småkakor", "bulle", "bullar", "drink", "cocktail", "smoothie", "milkshake",
+    "småkakor", "bulle", "bullar", "drink", "drinkar", "cocktail", "mocktail",
+    "smoothie", "milkshake", "dryck", "drycker", "toddy", "punsch", "shot",
     "glögg", "sylt", "marmelad",
     "tillbehör", "dressing", "röra", "dipp", "marinad", "pesto", "chutney",
     "sås", "majonnäs", "tzatziki", "kryddsmör",
@@ -89,8 +90,8 @@ _EJ_MÅLTID = {
 _EJ_MÅLTID_SUFFIX = (
     "dressing", "sås", "majonnäs", "majo", "pesto", "tzatziki", "chutney",
     "marmelad", "sylt", "tårta", "glass", "dipp", "smoothie", "milkshake",
-    "cocktail", "glögg", "kladdkaka", "cheesecake", "sorbet",
-    "drink", "shot", "lemonad", "macka", "smörgås", "toast",
+    "cocktail", "mocktail", "glögg", "kladdkaka", "cheesecake", "sorbet",
+    "drink", "shot", "lemonad", "macka", "smörgås", "toast", "mumma", "toddy",
 )
 
 # ICA:s receptkorpus innehåller även icke-mat (skönhets-/DIY-recept). Substr-
