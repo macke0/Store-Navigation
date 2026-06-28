@@ -437,21 +437,24 @@ Schema:
   "max_tid_min": null,      // heltal om kunden anger en tidsgräns, annars null
   "svårighet": null,        // "enkelt" om kunden vill ha lätt/snabblagat/nybörjare; "avancerat" om kunden vill laga något krångligt/festligt/utmanande; annars null
   "vill_efterrätt_dryck": false, // true ENDAST om kunden uttryckligen vill ha efterrätt/dessert/bakverk/fika/dryck/drink. Annars false (kunden vill ha vanlig mat/måltid).
+  "ekologiskt": false,      // true om kunden vill ha ekologiska/KRAV-märkta/organic-varor. Annars false.
   "nyckelord": []           // övriga sökord på svenska, gemener (t.ex. ["middag","gryta"]). Tom om inga.
 }
 
 Exempel:
-"ge mig något billigt" → {"ingredienser_med":[],"diet":null,"sortering":"billigt","max_tid_min":null,"svårighet":null,"vill_efterrätt_dryck":false,"nyckelord":[]}
-"high protein chicken dinner" → {"ingredienser_med":["kyckling"],"diet":null,"sortering":"protein","max_tid_min":null,"svårighet":null,"vill_efterrätt_dryck":false,"nyckelord":["middag"]}
-"maträtter som använder dagens kampanjer" → {"ingredienser_med":[],"diet":null,"sortering":"kampanj","max_tid_min":null,"svårighet":null,"vill_efterrätt_dryck":false,"nyckelord":[]}
-"enkel vegetarisk middag på 20 minuter" → {"ingredienser_med":[],"diet":"vegetariskt","sortering":"snabbt","max_tid_min":20,"svårighet":"enkelt","vill_efterrätt_dryck":false,"nyckelord":["middag"]}
-"en god efterrätt" → {"ingredienser_med":[],"diet":null,"sortering":"relevans","max_tid_min":null,"svårighet":null,"vill_efterrätt_dryck":true,"nyckelord":["efterrätt"]}"""
+"ge mig något billigt" → {"ingredienser_med":[],"diet":null,"sortering":"billigt","max_tid_min":null,"svårighet":null,"vill_efterrätt_dryck":false,"ekologiskt":false,"nyckelord":[]}
+"high protein chicken dinner" → {"ingredienser_med":["kyckling"],"diet":null,"sortering":"protein","max_tid_min":null,"svårighet":null,"vill_efterrätt_dryck":false,"ekologiskt":false,"nyckelord":["middag"]}
+"maträtter som använder dagens kampanjer" → {"ingredienser_med":[],"diet":null,"sortering":"kampanj","max_tid_min":null,"svårighet":null,"vill_efterrätt_dryck":false,"ekologiskt":false,"nyckelord":[]}
+"enkel vegetarisk middag på 20 minuter" → {"ingredienser_med":[],"diet":"vegetariskt","sortering":"snabbt","max_tid_min":20,"svårighet":"enkelt","vill_efterrätt_dryck":false,"ekologiskt":false,"nyckelord":["middag"]}
+"ekologisk middag med kyckling" → {"ingredienser_med":["kyckling"],"diet":null,"sortering":"relevans","max_tid_min":null,"svårighet":null,"vill_efterrätt_dryck":false,"ekologiskt":true,"nyckelord":["middag"]}
+"en god efterrätt" → {"ingredienser_med":[],"diet":null,"sortering":"relevans","max_tid_min":null,"svårighet":null,"vill_efterrätt_dryck":true,"ekologiskt":false,"nyckelord":["efterrätt"]}"""
 
 
 def _parsa_fraga(meddelande: str, model: str = MODELL) -> dict:
     standard = {"ingredienser_med": [], "diet": None, "sortering": "relevans",
                 "max_tid_min": None, "svårighet": None,
-                "vill_efterrätt_dryck": False, "nyckelord": []}
+                "vill_efterrätt_dryck": False, "ekologiskt": False,
+                "nyckelord": []}
     try:
         svar = client.messages.create(
             model=model,
@@ -488,7 +491,8 @@ def _ing_mangd(ing: dict) -> str:
 
 
 def _prissatt(recept: dict, sök, diet: str | None = None,
-              kampanj_läge: bool = False) -> tuple[float, float, float, int, int, float]:
+              kampanj_läge: bool = False,
+              ekologiskt: bool = False) -> tuple[float, float, float, int, int, float]:
     """(total, ordinarie, besparing, antal_kampanjvaror, antal_prissatta,
     viktad_besparing) från färska priser. antal_prissatta = ingredienser vi kunde
     sätta pris på, för att räkna ut hur STOR ANDEL av korgen som är på kampanj.
@@ -500,7 +504,7 @@ def _prissatt(recept: dict, sök, diet: str | None = None,
     kampanjer = 0
     prissatta = 0
     for ing in _unika_ingredienser(recept):
-        p = _matchad_produkt(ing, sök, diet, kampanj_läge)
+        p = _matchad_produkt(ing, sök, diet, kampanj_läge, ekologiskt)
         if not p:
             continue
         ord_pris = _flyt(p.get("pris"))
@@ -660,6 +664,23 @@ def _aktuell_besparing(p: dict) -> float:
     return max(0.0, ord_pris - kampanj) if ord_pris is not None else 0.0
 
 
+# Ekologi-markörer i ICA:s sortiment: "ekologisk(t/a)", KRAV-märkning och ICA:s
+# eko-varumärke "I Love Eco". "eko" ensamt är för kort/riskabelt (delsträng i
+# t.ex. "ekorre", "rekord") → vi kräver hela ordet/frasen.
+_EKO_MARKÖRER = ("ekologisk", "krav", "i love eco")
+
+
+def _är_ekologisk(p: dict | None) -> bool:
+    """True om produkten är ekologisk (namn/kategori/taggar nämner eko/KRAV/Eco)."""
+    if not p:
+        return False
+    text = " ".join([
+        p.get("namn") or "", p.get("kategori") or "",
+        " ".join(p.get("taggar") or []),
+    ]).lower()
+    return any(m in text for m in _EKO_MARKÖRER)
+
+
 # Stapel-kategorier (substräng på huvudkategorin) där ALLA varianter är fritt
 # utbytbara mot varandra även om de inte delar något ord: pasta (penne↔spaghetti),
 # kött- och fiskstyckningar (fläskkarré↔fläskkotlett, lax↔torsk). Här räcker SAMMA
@@ -693,21 +714,26 @@ def _kampanjindex(sök) -> dict:
     return _kampanj_per_kat
 
 
-def _byt_till_kampanjvara(val: dict, sök, diet: str | None, ing_namn: str) -> dict:
+def _byt_till_kampanjvara(val: dict, sök, diet: str | None, ing_namn: str,
+                          ekologiskt: bool = False) -> dict:
     """Byt den matchade produkten mot en KAMPANJVARA i SAMMA huvudkategori om den
-    sparar mer — för ALLA ingredienser, men bara när bytet är vettigt så rätten
-    inte blir konstig. Två godkända fall (utöver samma huvudkategori + diet-/
-    avledd-grind): (1) en stapel-kategori där alla varianter är utbytbara (kött/
-    fisk/pasta: fläskkarré→fläskfilé, penne→spaghetti), eller (2) kampanjvaran
-    delar råvarans HUVUDORD (gul lök→rödlök, potatis→färskpotatis). Annars hoppas
-    bytet över (morot↛rödbeta, äpple↛banan). Bästa namnmatchen behålls om inget
-    billigare passar.
+    sparar mer — för ALLA ingredienser, men bara när bytet är en ÄKTA motsvarighet
+    så rätten inte blir konstig. Två godkända fall (utöver samma huvudkategori +
+    diet-/avledd-grind): (1) en stapel-kategori där alla varianter är utbytbara
+    (kött/fisk/pasta: fläskkarré→fläskfilé, penne→spaghetti), eller (2) kampanjvaran
+    namnger råvaran som ett HELT ORD (poäng >= 2: 'riven ost'→annan 'Riven Ost' på
+    rea). Annars hoppas bytet över.
+
+    En kampanjvara som bara har råvaran som SAMMANSÄTTNINGS-suffix (poäng 1) räcker
+    INTE för icke-stapel-byten — då är det en egen smaksatt specialvara, inte en
+    motsvarighet (riven ost↛Brännvinsost, gul lök↛rödlök). Det håller 'maximera
+    kampanjer' till varor man faktiskt kan byta rakt av, så ingen rätt blir konstig.
 
     Fri stapel-byte tillåts BARA om grundmatchen verkligen REPRESENTERAR råvaran
     (råvaran är huvudordet i grundproduktens namn). Annars — svag/fel grundmatch
     (t.ex. "rökt paprikapulver" som fastnat på en chark-produkt) — krävs att
-    kampanjvaran delar huvudordet, så ett byte inte förvärrar en redan fel match
-    (paprikapulver↛salsiccia)."""
+    kampanjvaran namnger råvaran, så ett byte inte förvärrar en redan fel match
+    (paprikapulver↛salsiccia). Vid ekologiskt-önskemål byts bara till eko-varor."""
     huvudkat = _huvudkat(val.get("kategori", ""))
     if not huvudkat:
         return val
@@ -718,8 +744,10 @@ def _byt_till_kampanjvara(val: dict, sök, diet: str | None, ing_namn: str) -> d
     for kp in _kampanjindex(sök).get(huvudkat, []):
         if kp.get("id") == val.get("id") or not _giltig_kandidat(kp, diet, ing_namn):
             continue
-        if not fri_stapel and _huvudord_poäng(kp, huvud) < 1:
-            continue                       # ej stapel + delar ej huvudord → konstigt byte
+        if ekologiskt and not _är_ekologisk(kp):
+            continue                       # eko-önskemål → byt bara till eko-vara
+        if not fri_stapel and _huvudord_poäng(kp, huvud) < 2:
+            continue                       # ej stapel + namnger ej råvaran → konstigt byte
         besp = _aktuell_besparing(kp)
         if besp > bästa_besp:
             bästa, bästa_besp = kp, besp
@@ -867,7 +895,8 @@ def _huvudord_poäng(produkt: dict, huvud: str) -> int:
 
 
 def _matchad_produkt(ing: dict, sök, diet: str | None,
-                     kampanj_läge: bool = False) -> dict | None:
+                     kampanj_läge: bool = False,
+                     ekologiskt: bool = False) -> dict | None:
     """Den produkt en ingrediens ska prissättas/visas med — eller None. Sållar
     bort (a) skafferivaror (olja/salt/peppar), (b) för svaga fuzzy-träffar
     (skräpprodukter, < _MIN_MATCH_SCORE) och (c) produkter som bryter mot dieten.
@@ -905,6 +934,12 @@ def _matchad_produkt(ing: dict, sök, diet: str | None,
             giltiga.append((p, ms if ms is not None else 100.0))
     if not giltiga:
         return None
+    # Eko-önskemål: begränsa till ekologiska kandidater om någon finns (annars
+    # behåll alla — bättre en konventionell träff än ingen vara alls).
+    if ekologiskt:
+        eko = [g for g in giltiga if _är_ekologisk(g[0])]
+        if eko:
+            giltiga = eko
     # Re-ranka kandidaterna på en (täckning, huvudord)-nyckel:
     #  • täckning = hur många av RÅVARANS ord produkten har som helt ord — så att en
     #    varietet som matchar hela råvaran ("Gul lök" för "gul lök") slår en annan
@@ -941,7 +976,7 @@ def _matchad_produkt(ing: dict, sök, diet: str | None,
     # Kampanjläge: låt ingrediensen byta till en kampanjvara (alla ingredienser,
     # vettig grind) om det sparar mer → rätten BYGGS på veckans fynd.
     if kampanj_läge:
-        return _byt_till_kampanjvara(val, sök, diet, ing.get("namn", ""))
+        return _byt_till_kampanjvara(val, sök, diet, ing.get("namn", ""), ekologiskt)
     return val
 
 
@@ -1248,13 +1283,14 @@ def _anvand_andel(mangd: str, produktnamn: str) -> float:
 
 def _till_matratt(recept: dict, sök, produkt_db: dict,
                   total: float, ordinarie: float, besparing: float,
-                  diet: str | None = None, kampanj_läge: bool = False) -> dict:
+                  diet: str | None = None, kampanj_läge: bool = False,
+                  ekologiskt: bool = False) -> dict:
     ingredienser = []
     for ing in _unika_ingredienser(recept):
         # Samma grind som prissättningen: dölj skafferivaror, svaga fuzzy-träffar
         # och produkter som bryter mot dieten (olja→babyolja, peppar→pepparbiff,
         # kött i veg-rätt) → de visas som omatchade i inköpslistan.
-        p = _matchad_produkt(ing, sök, diet, kampanj_läge)
+        p = _matchad_produkt(ing, sök, diet, kampanj_läge, ekologiskt)
         pid = p.get("id") if p else None
         pos = produkt_db.get(pid) or {}
         mangd = _ing_mangd(ing)
@@ -1288,6 +1324,7 @@ def _till_matratt(recept: dict, sök, produkt_db: dict,
         "fett_g_per_portion":        näring.get("fett"),
         "kcal_per_portion":          näring.get("kcal"),
         "bild_url":     _bild_url(recept),
+        "recept_url":   recept.get("url"),
         "betyg":        recept.get("betyg"),
         "antal_betyg":  recept.get("antal_betyg"),
         "tid_min":      _tid_min(recept),
@@ -1323,6 +1360,8 @@ def sok_recept(meddelande: str, karta: str = "hela_butiken",
     # stapel-kategori (kött/fisk/pasta) → priser, ranking OCH inköpslista byggs
     # på veckans fynd. Påverkar inga andra sorteringar.
     kampanj_läge = (filt.get("sortering") == "kampanj")
+    # Eko-önskemål: föredra ekologiska/KRAV-produkter vid varje ingrediens-match.
+    ekologiskt = bool(filt.get("ekologiskt"))
 
     scored: list[dict] = []
     for r in recept:
@@ -1350,7 +1389,7 @@ def sok_recept(meddelande: str, karta: str = "hela_butiken",
         if önskad_svårighet and _svårighet(r) != önskad_svårighet:
             continue
         total, ordinarie, besparing, kampanjer, prissatta, viktad_besparing = \
-            _prissatt(r, sök, diet, kampanj_läge)
+            _prissatt(r, sök, diet, kampanj_läge, ekologiskt)
         # Inget matchat = tom inköpslista → värdelös träff i kund-flödet.
         if prissatta == 0:
             continue
@@ -1405,7 +1444,8 @@ def sok_recept(meddelande: str, karta: str = "hela_butiken",
     topp = scored[:antal] if med else _diversifiera(scored, antal)
     matratter = [
         _till_matratt(s["recept"], sök, produkt_db,
-                      s["total"], s["ordinarie"], s["viktad_besparing"], diet, kampanj_läge)
+                      s["total"], s["ordinarie"], s["viktad_besparing"],
+                      diet, kampanj_läge, ekologiskt)
         for s in topp
     ]
     return {"matratter": matratter}
