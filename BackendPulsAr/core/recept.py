@@ -288,14 +288,16 @@ def bygg_recept_index() -> int:
     })
     print(f"🔎 {len(unika)} unika ingredienser att matcha mot sortimentet")
 
-    # Fuzzy-sökningen är GIL-bunden ren Python → parallellisera över kärnor.
-    # MEN varje arbetarprocess laddar hela sortiments-katalogen (~18k produkter)
-    # i eget minne → en-arbetare-per-kärna sprängde RAM (OOM → BrokenProcessPool)
-    # på en mångkärnig box när receptmängden växte. Tak på 4 (env-överstyrbart)
-    # bundet av kärnor håller RAM ≈ 4× katalog; fortfarande snabbt nog.
-    arbetare = max(1, min(
-        int(os.environ.get("RECEPT_INDEX_ARBETARE", "4")),
-        os.cpu_count() or 2,
+    # Fuzzy-sökningen är GIL-bunden ren Python → parallellisera över processer.
+    # Ladda katalogen EN gång i FÖRÄLDERN innan poolen skapas: på Linux forkar
+    # ProcessPoolExecutor, så arbetarna ÄRVER den färdigladdade ProduktSök-
+    # singletonen via copy-on-write i stället för att var och en ladda sin egen
+    # ~18k-katalog (det sprängde RAM → OOM/BrokenProcessPool när receptmängden
+    # växte). Nu håller RAM ≈ 1× katalog OAVSETT antal arbetare → alla kärnor
+    # kan användas igen. (RECEPT_INDEX_ARBETARE överstyr vid behov.)
+    get_produkt_sök()  # bygg singletonen i föräldern → delas till forkade arbetare
+    arbetare = max(1, int(
+        os.environ.get("RECEPT_INDEX_ARBETARE", str(os.cpu_count() or 4))
     ))
     storlek = max(1, math.ceil(len(unika) / arbetare))
     chunkar = [unika[i:i + storlek] for i in range(0, len(unika), storlek)]
