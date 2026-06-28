@@ -289,7 +289,14 @@ def bygg_recept_index() -> int:
     print(f"🔎 {len(unika)} unika ingredienser att matcha mot sortimentet")
 
     # Fuzzy-sökningen är GIL-bunden ren Python → parallellisera över kärnor.
-    arbetare = max(1, os.cpu_count() or 2)
+    # MEN varje arbetarprocess laddar hela sortiments-katalogen (~18k produkter)
+    # i eget minne → en-arbetare-per-kärna sprängde RAM (OOM → BrokenProcessPool)
+    # på en mångkärnig box när receptmängden växte. Tak på 4 (env-överstyrbart)
+    # bundet av kärnor håller RAM ≈ 4× katalog; fortfarande snabbt nog.
+    arbetare = max(1, min(
+        int(os.environ.get("RECEPT_INDEX_ARBETARE", "4")),
+        os.cpu_count() or 2,
+    ))
     storlek = max(1, math.ceil(len(unika) / arbetare))
     chunkar = [unika[i:i + storlek] for i in range(0, len(unika), storlek)]
     cache: dict[str, list[dict]] = {}
