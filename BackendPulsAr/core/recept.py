@@ -1321,17 +1321,19 @@ def sok_recept(meddelande: str, karta: str = "hela_butiken",
     if sortering == "billigt":
         scored = [s for s in scored if s["total"] > 0]
     # "Kampanj": kunden vill ha rätter BYGGDA på kampanjvaror → kräv en RIKTIG
-    # måltid som kombinerar MINST TRE kampanjfynd och blir märkbart billigare än
-    # vanligt — mätt på den VIKTADE besparingen, så en rätt som "sparar 20 kr" på
-    # en vara man bara använder en skvätt av inte räknas som ett storfynd. Annars
-    # toppar tunna rätter där bara en skafferivara (t.ex. smör) råkar vara på rea.
+    # måltid som blir märkbart billigare än vanligt, mätt på den VIKTADE
+    # besparingen, så en rätt som "sparar 20 kr" på en vara man bara använder en
+    # skvätt av inte räknas som ett storfynd. Annars toppar tunna rätter där bara
+    # en skafferivara (t.ex. smör) råkar vara på rea. Vi FÖREDRAR rätter som
+    # kombinerar minst TRE kampanjfynd, men faller tillbaka till minst två om för
+    # få sådana finns (annars blir listan i princip tom vissa veckor).
     elif sortering == "kampanj":
-        scored = [
-            s for s in scored
-            if s["total"] > 0 and s["prissatta"] >= 3 and s["kampanjer"] >= 3
-            and s["ordinarie"] > 0
-            and s["viktad_besparing"] / s["ordinarie"] >= _MIN_KAMPANJANDEL
-        ]
+        def _kampanj_ok(s, min_kampanjer):
+            return (s["total"] > 0 and s["prissatta"] >= 3
+                    and s["kampanjer"] >= min_kampanjer and s["ordinarie"] > 0
+                    and s["viktad_besparing"] / s["ordinarie"] >= _MIN_KAMPANJANDEL)
+        strikt = [s for s in scored if _kampanj_ok(s, 3)]
+        scored = strikt if len(strikt) >= antal else [s for s in scored if _kampanj_ok(s, 2)]
 
     _sortera(scored, sortering)
     # Sprid över proteinkällor så toppen inte blir t.ex. bara kyckling — men
