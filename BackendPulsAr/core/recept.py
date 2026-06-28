@@ -739,6 +739,10 @@ _ING_KVALIFICERARE = re.compile(
 # tillagnings-/serverings-svans bär ingen produktidentitet.
 _ING_TILL = re.compile(r"\btill\s+.*$")
 _ING_FILLER = re.compile(r"\b(?:ev|gärna|förslagsvis|t\s*ex)\b")
+# Kvalitets-/sortord utan produktidentitet ("potatis av mjölig SORT", "lök av
+# fast SLAG") — de drar matchningen mot fel varor (sort→"Compact Sort"-back) utan
+# att beskriva råvaran. "av" är alltid preposition i ingredienslistor → ofarlig.
+_ING_KVALITETSORD = re.compile(r"\b(?:av|sorter|sorters|sort|sorts|slags?|typ(?:er)?)\b")
 # Alternativ-separatorer (eller/alt/alternativt//) → matcha varje för sig.
 _ALT_SEP = re.compile(r"\s+(?:eller|alt|alternativt)\s+|\s*/\s*")
 
@@ -757,15 +761,37 @@ def _rensa_ingrediensnamn(namn: str) -> str:
     s = _ING_MÄNGDORD.sub(" ", s)
     s = _ING_KVALIFICERARE.sub(" ", s)
     s = _ING_FILLER.sub(" ", s)
+    s = _ING_KVALITETSORD.sub(" ", s)
     s = re.sub(r"[^a-zåäö\s]", " ", s)
     return re.sub(r"\s+", " ", s).strip()
 
 
+def _parentes_alternativ(namn: str) -> list[str]:
+    """Råvaru-ALTERNATIV ur parenteser: 'skogssvamp (t ex karljohans eller
+    kantareller)' → ['karljohans','kantareller']. _rensa_ingrediensnamn slänger
+    parenteser, men en alternativ vara som FINNS i sortimentet (kantareller) bör
+    komma med bland sökkandidaterna istället för att råvaran fastnar på skräp
+    (skogssvamp→Servett 'Skog'). Bara parenteser som tydligt listar alternativ
+    (eller/alt/t ex/gärna) tas med — inte mängd-/instruktionsparenteser
+    ('(à 600 g)', '(rivet skal och saft)')."""
+    ut: list[str] = []
+    for grupp in re.findall(r"\(([^)]*)\)", (namn or "").lower()):
+        if not re.search(r"\b(?:eller|alt|alternativt|t\s*ex|tex|gärna)\b", grupp):
+            continue
+        g = re.sub(r"\b(?:t\s*ex|tex|gärna|ca|ungefär|motsvarar)\b", " ", grupp)
+        for del_ in re.split(r"\s*,\s*|" + _ALT_SEP.pattern, g):
+            del_ = re.sub(r"[^a-zåäö\s]", " ", del_ or "").strip()
+            if del_ and del_ not in ut:
+                ut.append(del_)
+    return ut
+
+
 def _sök_termer(namn: str) -> list[str]:
     """Sökord för en ingrediens vid index-matchning: rensat helnamn + varje
-    alternativ (eller/alt//) + HUVUDORDET (sista alfaordet). Så prep-/behållar-
-    brus ('finskuren gräslök'→gräslök, 'knippa dill'→dill, 'smör eller
-    margarin'→smör+margarin) ändå hittar råvaran, utan ordlista. Helnamnet ligger
+    alternativ (eller/alt//) + parentes-alternativ + HUVUDORDET (sista alfaordet).
+    Så prep-/behållar-brus ('finskuren gräslök'→gräslök, 'knippa dill'→dill, 'smör
+    eller margarin'→smör+margarin) och parentes-alternativ ('svamp (t ex
+    kantareller)'→kantareller) ändå hittar råvaran, utan ordlista. Helnamnet ligger
     kvar först → produktvarianter ('rostad lök'→Rostad lök) finns bland kandidat-
     erna och vinner på täcknings-/huvudord-omrankningen vid körning."""
     rensat = _rensa_ingrediensnamn(namn) or (namn or "").lower().strip()
@@ -774,6 +800,9 @@ def _sök_termer(namn: str) -> list[str]:
         del_ = del_.strip()
         if del_ and del_ not in termer:
             termer.append(del_)
+    for alt in _parentes_alternativ(namn):
+        if alt not in termer:
+            termer.append(alt)
     ord_ = re.findall(r"[a-zåäö]+", rensat)
     if ord_ and ord_[-1] not in termer:
         termer.append(ord_[-1])
@@ -1328,12 +1357,23 @@ def sok_recept(meddelande: str, karta: str = "hela_butiken",
     # kombinerar minst TRE kampanjfynd, men faller tillbaka till minst två om för
     # få sådana finns (annars blir listan i princip tom vissa veckor).
     elif sortering == "kampanj":
-        def _kampanj_ok(s, min_kampanjer):
+        # Föredra rätter byggda på MÅNGA kampanjfynd, men trappa ned kraven så
+        # listan inte blir tom — särskilt för smala dieter (vegetariskt/veganskt)
+        # där få recept råkar ha tre nedsatta varor samtidigt. Varje steg är en
+        # supermängd av det föregående (lättar antingen antalet fynd eller, sista
+        # steget, andelsgolvet). Vi tar det STRIKTASTE steg som ger nog med rätter,
+        # annars det lösaste (sista) — så kunden alltid får en fyllig lista.
+        def _kampanj_ok(s, min_kampanjer, kräv_golv):
             return (s["total"] > 0 and s["prissatta"] >= 3
                     and s["kampanjer"] >= min_kampanjer and s["ordinarie"] > 0
-                    and s["viktad_besparing"] / s["ordinarie"] >= _MIN_KAMPANJANDEL)
-        strikt = [s for s in scored if _kampanj_ok(s, 3)]
-        scored = strikt if len(strikt) >= antal else [s for s in scored if _kampanj_ok(s, 2)]
+                    and (not kräv_golv
+                         or s["viktad_besparing"] / s["ordinarie"] >= _MIN_KAMPANJANDEL))
+        vald: list[dict] = []
+        for min_k, golv in ((3, True), (2, True), (1, True), (1, False)):
+            vald = [s for s in scored if _kampanj_ok(s, min_k, golv)]
+            if len(vald) >= antal:
+                break
+        scored = vald
 
     _sortera(scored, sortering)
     # Sprid över proteinkällor så toppen inte blir t.ex. bara kyckling — men
