@@ -633,8 +633,8 @@ def _är_avledd_form(produkt: dict, ing_namn: str) -> bool:
     # råvaran ÄR den efterfrågade, inte en avledd form. Fångar t.ex. ingrediens
     # "rostad lök" → produkt "Rostad lök" trots hyllkategorin "Torkad lök", men
     # släpper INTE igenom "lök" → "Rostad lök" (då saknas "rostad" i ingrediensen).
-    ing_ord = set(re.findall(r"[a-zåäö]+", ing))
-    namn_ord = re.findall(r"[a-zåäö]+", namn)
+    ing_ord = set(re.findall(r"[a-zåäöéè]+", ing))
+    namn_ord = re.findall(r"[a-zåäöéè]+", namn)
     if ing_ord and namn_ord and ing_ord <= set(namn_ord) and namn_ord[0] in ing_ord:
         return False
     if any(k in kat and k.strip() not in ing for k in _AVLEDDA_KATEGORIER):
@@ -763,7 +763,7 @@ def _rensa_ingrediensnamn(namn: str) -> str:
     s = _ING_KVALIFICERARE.sub(" ", s)
     s = _ING_FILLER.sub(" ", s)
     s = _ING_KVALITETSORD.sub(" ", s)
-    s = re.sub(r"[^a-zåäö\s]", " ", s)
+    s = re.sub(r"[^a-zåäöéè\s]", " ", s)
     return re.sub(r"\s+", " ", s).strip()
 
 
@@ -781,7 +781,7 @@ def _parentes_alternativ(namn: str) -> list[str]:
             continue
         g = re.sub(r"\b(?:t\s*ex|tex|gärna|ca|ungefär|motsvarar)\b", " ", grupp)
         for del_ in re.split(r"\s*,\s*|" + _ALT_SEP.pattern, g):
-            del_ = re.sub(r"[^a-zåäö\s]", " ", del_ or "").strip()
+            del_ = re.sub(r"[^a-zåäöéè\s]", " ", del_ or "").strip()
             if del_ and del_ not in ut:
                 ut.append(del_)
     return ut
@@ -804,7 +804,7 @@ def _sök_termer(namn: str) -> list[str]:
     for alt in _parentes_alternativ(namn):
         if alt not in termer:
             termer.append(alt)
-    ord_ = re.findall(r"[a-zåäö]+", rensat)
+    ord_ = re.findall(r"[a-zåäöéè]+", rensat)
     if ord_ and ord_[-1] not in termer:
         termer.append(ord_[-1])
     return termer
@@ -830,7 +830,7 @@ def _unika_ingredienser(recept: dict) -> list[dict]:
 def _ingrediens_huvudord(namn: str) -> str:
     """Råvarans huvudord = sista alfabetiska ordet (svenska sammansättningar har
     substantivet sist: 'hel vitlök'→vitlök, 'riven prästost'→prästost)."""
-    ord = re.findall(r"[a-zåäö]+", (namn or "").lower())
+    ord = re.findall(r"[a-zåäöéè]+", (namn or "").lower())
     return ord[-1] if ord else ""
 
 
@@ -842,7 +842,7 @@ def _huvudord_poäng(produkt: dict, huvud: str) -> int:
     Bryter delsträngs-bias i fuzzy-sökningen utan att röra själva sökmotorn."""
     if not huvud:
         return 0
-    ord = re.findall(r"[a-zåäö]+", (produkt.get("namn") or "").lower())
+    ord = re.findall(r"[a-zåäöéè]+", (produkt.get("namn") or "").lower())
     if not ord:
         return 0
     if ord[0] == huvud:
@@ -914,10 +914,10 @@ def _matchad_produkt(ing: dict, sök, diet: str | None,
     # Stabil sort bevarar match_score-ordningen inom samma nyckel, och när ingen
     # kandidat sticker ut (alla lika) blir resultatet oförändrat = ofarlig fallback.
     huvud = _ingrediens_huvudord(rensat)
-    ing_ord = set(re.findall(r"[a-zåäö]+", rensat.lower()))
+    ing_ord = set(re.findall(r"[a-zåäöéè]+", rensat.lower()))
 
     def _ranknyckel(p: dict) -> tuple[int, int]:
-        pord = set(re.findall(r"[a-zåäö]+", (p.get("namn") or "").lower()))
+        pord = set(re.findall(r"[a-zåäöéè]+", (p.get("namn") or "").lower()))
         return (len(ing_ord & pord), _huvudord_poäng(p, huvud))
 
     rankade = sorted(
