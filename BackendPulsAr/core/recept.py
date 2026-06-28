@@ -480,13 +480,22 @@ def _flyt(värde) -> float | None:
         return None
 
 
+def _ing_mangd(ing: dict) -> str:
+    """Receptmängd som text ('2 dl', '200 g') ur ett ingrediens-dict."""
+    return " ".join(filter(None, [ing.get("mangd", ""), ing.get("enhet", "")])).strip() \
+        or ing.get("text", "")
+
+
 def _prissatt(recept: dict, sök, diet: str | None = None,
-              kampanj_läge: bool = False) -> tuple[float, float, float, int, int]:
-    """(total, ordinarie, besparing, antal_kampanjvaror, antal_prissatta) från
-    färska priser. antal_prissatta = ingredienser vi kunde sätta pris på, för att
-    kunna räkna ut hur STOR ANDEL av korgen som är på kampanj. Produkter som
-    bryter mot dieten räknas INTE (de visas inte heller, se _till_matratt)."""
-    total = ordinarie = 0.0
+              kampanj_läge: bool = False) -> tuple[float, float, float, int, int, float]:
+    """(total, ordinarie, besparing, antal_kampanjvaror, antal_prissatta,
+    viktad_besparing) från färska priser. antal_prissatta = ingredienser vi kunde
+    sätta pris på, för att räkna ut hur STOR ANDEL av korgen som är på kampanj.
+    viktad_besparing = rabatten VIKTAD med hur stor del av förpackningen receptet
+    faktiskt använder — så en 20 kr-rabatt på en vara man bara använder en skvätt
+    av inte räknas som full besparing för måltiden (vilseledande, se _anvand_andel).
+    Produkter som bryter mot dieten räknas INTE (de visas inte heller)."""
+    total = ordinarie = viktad_besparing = 0.0
     kampanjer = 0
     prissatta = 0
     for ing in _unika_ingredienser(recept):
@@ -503,7 +512,9 @@ def _prissatt(recept: dict, sök, diet: str | None = None,
             ordinarie += ord_pris
         if kampanj is not None:
             kampanjer += 1
-    return round(total, 2), round(ordinarie, 2), round(ordinarie - total, 2), kampanjer, prissatta
+            viktad_besparing += _aktuell_besparing(p) * _anvand_andel(_ing_mangd(ing), p.get("namn", ""))
+    return (round(total, 2), round(ordinarie, 2), round(ordinarie - total, 2),
+            kampanjer, prissatta, round(viktad_besparing, 2))
 
 
 def _kampanjpoäng(besparing: float, ordinarie: float, kampanjer: int,
@@ -1169,6 +1180,19 @@ def _åtgång(mangd: str, produktnamn: str) -> dict | None:
     }
 
 
+def _anvand_andel(mangd: str, produktnamn: str) -> float:
+    """Hur stor del av EN förpackning receptet använder (kan vara >1 vid flera
+    förpackningar). Används för att VIKTA kampanj-besparingen: använder receptet
+    bara en skvätt av en rabatterad storförpackning ska inte hela rabatten räknas
+    som måltidens besparing. Returnerar 1.0 när mängd/förpackning inte går att
+    jämföra (t.ex. '1 förp', hel styckning) → räkna då hela rabatten."""
+    åt, d1 = _parsa_mängd(mangd)
+    pak, d2 = _paket_storlek(produktnamn)
+    if åt is None or pak is None or d1 != d2 or pak <= 0:
+        return 1.0
+    return åt / pak
+
+
 def _till_matratt(recept: dict, sök, produkt_db: dict,
                   total: float, ordinarie: float, besparing: float,
                   diet: str | None = None, kampanj_läge: bool = False) -> dict:
@@ -1180,8 +1204,7 @@ def _till_matratt(recept: dict, sök, produkt_db: dict,
         p = _matchad_produkt(ing, sök, diet, kampanj_läge)
         pid = p.get("id") if p else None
         pos = produkt_db.get(pid) or {}
-        mangd = " ".join(filter(None, [ing.get("mangd", ""), ing.get("enhet", "")])).strip() \
-            or ing.get("text", "")
+        mangd = _ing_mangd(ing)
         åtg = _åtgång(mangd, p.get("namn", "")) if p else None
         ingredienser.append({
             "produkt_id":      pid if p else None,
@@ -1273,18 +1296,22 @@ def sok_recept(meddelande: str, karta: str = "hela_butiken",
         # avancerade (recept med okänd tid/steg hamnar i "medel" → utesluts då).
         if önskad_svårighet and _svårighet(r) != önskad_svårighet:
             continue
-        total, ordinarie, besparing, kampanjer, prissatta = _prissatt(r, sök, diet, kampanj_läge)
+        total, ordinarie, besparing, kampanjer, prissatta, viktad_besparing = \
+            _prissatt(r, sök, diet, kampanj_läge)
         # Inget matchat = tom inköpslista → värdelös träff i kund-flödet.
         if prissatta == 0:
             continue
         scored.append({
             "recept": r, "total": total, "ordinarie": ordinarie,
-            "besparing": besparing, "kampanjer": kampanjer,
-            "prissatta": prissatta,
+            "besparing": besparing, "viktad_besparing": viktad_besparing,
+            "kampanjer": kampanjer, "prissatta": prissatta,
             "proteinkälla": _proteinkälla(r),
-            "kampanjpoäng": _kampanjpoäng(besparing, ordinarie, kampanjer,
+            # Ranking + visad besparing utgår från den VIKTADE besparingen → en
+            # rätt vars enda fynd används till en skvätt rankas/visas inte som
+            # storfynd.
+            "kampanjpoäng": _kampanjpoäng(viktad_besparing, ordinarie, kampanjer,
                                           prissatta, total),
-            "relevans": _relevans(r, filt, besparing, kampanjer,
+            "relevans": _relevans(r, filt, viktad_besparing, kampanjer,
                                   mättnadsbonus=not vill_efterrätt),
         })
 
@@ -1294,15 +1321,16 @@ def sok_recept(meddelande: str, karta: str = "hela_butiken",
     if sortering == "billigt":
         scored = [s for s in scored if s["total"] > 0]
     # "Kampanj": kunden vill ha rätter BYGGDA på kampanjvaror → kräv en RIKTIG
-    # måltid (minst 3 prissatta varor) som kombinerar MINST TVÅ kampanjfynd och
-    # blir märkbart billigare än vanligt. Annars toppar tunna rätter där bara en
-    # skafferivara (t.ex. smör) råkar vara på rea.
+    # måltid som kombinerar MINST TRE kampanjfynd och blir märkbart billigare än
+    # vanligt — mätt på den VIKTADE besparingen, så en rätt som "sparar 20 kr" på
+    # en vara man bara använder en skvätt av inte räknas som ett storfynd. Annars
+    # toppar tunna rätter där bara en skafferivara (t.ex. smör) råkar vara på rea.
     elif sortering == "kampanj":
         scored = [
             s for s in scored
-            if s["total"] > 0 and s["prissatta"] >= 3 and s["kampanjer"] >= 2
+            if s["total"] > 0 and s["prissatta"] >= 3 and s["kampanjer"] >= 3
             and s["ordinarie"] > 0
-            and s["besparing"] / s["ordinarie"] >= _MIN_KAMPANJANDEL
+            and s["viktad_besparing"] / s["ordinarie"] >= _MIN_KAMPANJANDEL
         ]
 
     _sortera(scored, sortering)
@@ -1311,7 +1339,7 @@ def sok_recept(meddelande: str, karta: str = "hela_butiken",
     topp = scored[:antal] if med else _diversifiera(scored, antal)
     matratter = [
         _till_matratt(s["recept"], sök, produkt_db,
-                      s["total"], s["ordinarie"], s["besparing"], diet, kampanj_läge)
+                      s["total"], s["ordinarie"], s["viktad_besparing"], diet, kampanj_läge)
         for s in topp
     ]
     return {"matratter": matratter}
