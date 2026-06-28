@@ -1018,6 +1018,29 @@ def _är_ej_måltid(recept: dict) -> bool:
     return sista.endswith(_EJ_MÅLTID_SUFFIX)
 
 
+# Drycker (cocktails/drinkar) saknar ofta kategori OCH har namn utan dryckesord
+# (t.ex. "Aquapolitan") → varken kategori- eller namn-vetot fångar dem. En drink
+# består dock till STÖRSTA delen av drycker/sprit; en middag som använder EN skvätt
+# vin/konjak gör det inte. Vi flaggar därför recept där >=3 ingredienser är drycker.
+_DRYCK_INGREDIENS = (
+    "champagne", "prosecco", "mousserande", "vermouth", "sherry", "portvin",
+    "brännvin", "vodka", "whisky", "whiskey", "bourbon", "rom (", "ljus rom",
+    "mörk rom", "cognac", "konjak", "likör", "snaps", "akvavit", "aquavit",
+    "tequila", "absint", "campari", "aperol",
+    "club soda", "tonic", "sockerdricka", "sodavatten", "lemonad",
+    "grapefruktjuice", "apelsinjuice", "ananasjuice", "tranbärsjuice",
+    "lingondricka", "måltidsdryck", "glögg",
+)
+
+
+def _är_dryck(recept: dict) -> bool:
+    """True om receptet är en drink/cocktail: minst tre ingredienser är drycker/sprit.
+    En måltid med en skvätt vin/konjak triggar aldrig (för få dryckesingredienser)."""
+    namn = [(ing.get("namn") or "").lower() for ing in recept.get("ingredienser", [])]
+    antal = sum(1 for n in namn if any(d in n for d in _DRYCK_INGREDIENS))
+    return antal >= 3
+
+
 def _innehåller_alla(recept: dict, ord_lista: list[str]) -> bool:
     taggar = recept.get("taggar", "")
     return all(o.lower() in taggar for o in ord_lista)
@@ -1311,7 +1334,7 @@ def sok_recept(meddelande: str, karta: str = "hela_butiken",
         # Visa bara riktiga måltider om kunden inte uttryckligen bett om
         # efterrätt/dryck — annars rankas snabba desserter/tilltugg över middagar.
         if not vill_efterrätt:
-            if _är_ej_måltid(r):
+            if _är_ej_måltid(r) or _är_dryck(r):
                 continue
             kcal = (r.get("naring") or {}).get("kcal")
             if kcal is not None and kcal < _MIN_KCAL_MÅLTID:
