@@ -865,6 +865,22 @@ def _sök_termer(namn: str) -> list[str]:
     ord_ = re.findall(r"[a-zåäöéè]+", rensat)
     if ord_ and ord_[-1] not in termer:
         termer.append(ord_[-1])
+    # Långt sammansatt plural-token ('bananschalottenlökar', 'miniplommontomater')
+    # når inte sin singular-produkt (Schalottenlök) via difflib-golvet i produkt_sok:
+    # plural-ändelsen drar SequenceMatcher-ratio under 0.80 → produkten kommer aldrig
+    # in i kandidatsetet, så körnings-omrankningen kan inte välja den. Lägg den
+    # avpluraliserade formen som EXTRA sökterm (helnamnet kvar först = säkerhetsnät).
+    # Bara LÅNGA token (>=12) → korta vanliga plural (morötter/tomater) rörs ej; de
+    # når redan sin singular. Felaktig avplural ger på sin höjd en svag extra kandidat
+    # som omrankningen ignorerar.
+    huvud = ord_[-1] if ord_ else ""
+    if len(huvud) >= 12:
+        for suff in ("arna", "orna", "erna", "ar", "or", "er", "na", "en"):
+            if huvud.endswith(suff) and len(huvud) - len(suff) >= 8:
+                avplural = huvud[: -len(suff)]
+                if avplural not in termer:
+                    termer.append(avplural)
+                break
     return termer
 
 
