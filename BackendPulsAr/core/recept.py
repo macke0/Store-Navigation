@@ -907,13 +907,20 @@ def _huvudord_poäng(produkt: dict, huvud: str) -> int:
         return 3
     if huvud in ord:
         return 2
-    # Sammansatt råvara som ETT token (ingen mellanslag): "bananschalottenlök",
-    # "miniplommontomater". Svenskt huvudmorfem ligger SIST → produkten vars
-    # namnord ÄR detta suffix-huvud (Schalottenlök, Plommontomater) ÄR råvaran och
-    # ska slå en produkt som bara delar förleds-kvalificeraren (Banan, Mini). Kräver
-    # långt suffix (>=6) så generiska korta huvuden INTE promotas (havremjölk→Mjölk,
-    # prästost→Ost) — de katalog-glappen lämnas oförändrade.
-    if any(len(o) >= 6 and len(huvud) > len(o) and huvud.endswith(o) for o in ord):
+    # Sammansatt råvara som ETT token (ingen mellanslag): "bananschalottenlök(ar)",
+    # "miniplommontomater". Svenskt huvudmorfem ligger SIST → produkten vars namnord
+    # ÄR detta suffix-huvud (Schalottenlök, Plommontomater) ÄR råvaran och ska slå en
+    # produkt som bara delar förleds-kvalificeraren (Banan, Mini). Tål en böjnings-
+    # ändelse mellan ("bananschalottenlökar" → Schalottenlök). Kräver långt suffix
+    # (>=6) så generiska korta huvuden INTE promotas (havremjölk→Mjölk, prästost→Ost)
+    # — de katalog-glappen lämnas oförändrade. len-kravet > o+böjning reserverar
+    # tier:2 för ÄKTA sammansättning (förled finns), ej råvarans egen plural.
+    def _suffix_huvud(o: str) -> bool:
+        return len(o) >= 6 and any(
+            len(huvud) > len(o) + len(b) and huvud.endswith(o + b)
+            for b in _BÖJNINGS_SUFFIX
+        )
+    if any(_suffix_huvud(o) for o in ord):
         return 2
     if any(o.endswith(huvud) and len(o) > len(huvud) for o in ord):
         return 1
