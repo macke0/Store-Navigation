@@ -237,32 +237,35 @@ def recept_finns() -> bool:
 # FÖRMATCHNING (offline)
 # ─────────────────────────────────────────────
 
-def _matcha_namn_chunk(namn_lista: list[str]) -> dict[str, list[dict]]:
+def _matcha_namn_chunk(term_grupper: list[tuple[str, ...]]) -> dict[tuple, list[dict]]:
     """
-    Processpool-arbetare: matcha en grupp unika ingrediensnamn mot sortimentet.
+    Processpool-arbetare: matcha en grupp UNIKA sökterm-nycklar mot sortimentet.
+    Varje nyckel är de färdigberäknade _sök_termer (helnamn + alternativ +
+    huvudord) för en ingrediens — föräldern dedupar på nyckeln så mängd-/prep-
+    varianter ('mjölk'/'2 dl mjölk'/'3 dl mjölk') som rensar till SAMMA termer
+    bara söks EN gång (var tidigare en sökning per rått namn).
     Varje process laddar sin egen ProduktSök-singleton (en gång) och kör den
     GIL-bundna fuzzy-sökningen — så flera kärnor jobbar parallellt. Returnerar
-    en LISTA med de bästa kandidaterna (id + match_score) per ingrediens, inte
-    bara top-1: så kan sökningen vid körning välja den kandidat som är på KAMPANJ
-    just nu (priserna byts varje vecka, indexet ligger fast). Svaga träffar
-    (< golvet) sållas bort vid sökning, inte här.
+    en LISTA med de bästa kandidaterna (id + match_score) per nyckel, inte bara
+    top-1: så kan sökningen vid körning välja den kandidat som är på KAMPANJ just
+    nu (priserna byts varje vecka, indexet ligger fast). Svaga träffar (< golvet)
+    sållas bort vid sökning, inte här.
     """
     sök = get_produkt_sök()
-    ut: dict[str, list[dict]] = {}
-    for namn in namn_lista:
-        # Sök på FLERA termer (helnamn + alternativ + huvudord, se _sök_termer) och
-        # UNIONa kandidaterna: så 'finskuren gräslök'/'smör till stekning'/'smör
-        # eller margarin' ändå hittar råvaran utan ordlista. Top-12 (inte 5):
-        # form-vetot (_är_avledd_form) kan såll bort flera avledda toppträffar
-        # (morot → morotsjuice/-soppa/-kaka...) innan den rena råvaran dyker upp.
+    ut: dict[tuple, list[dict]] = {}
+    for termer in term_grupper:
+        # UNIONa kandidaterna över alla termer: så 'finskuren gräslök'/'smör till
+        # stekning'/'smör eller margarin' ändå hittar råvaran utan ordlista. Top-12
+        # (inte 5): form-vetot (_är_avledd_form) kan såll bort flera avledda
+        # toppträffar (morot → morotsjuice/-soppa/-kaka...) innan den rena råvaran.
         bäst: dict[str, float] = {}
-        for term in _sök_termer(namn):
+        for term in termer:
             for t in sök.sök(term, 12):
                 pid, score = t.get("id"), t.get("match_score") or 0.0
                 if pid is not None and score > bäst.get(pid, -1.0):
                     bäst[pid] = score
         topp = sorted(bäst.items(), key=lambda kv: kv[1], reverse=True)[:12]
-        ut[namn] = [{"id": pid, "score": score} for pid, score in topp]
+        ut[termer] = [{"id": pid, "score": score} for pid, score in topp]
     return ut
 
 
@@ -279,14 +282,19 @@ def bygg_recept_index() -> int:
     with open(DATA_FIL, encoding="utf-8") as f:
         recept = json.load(f)
 
-    # Samla unika ingrediensnamn (gemener, trimmat) — matcha varje EN gång.
-    unika = sorted({
-        nyckel
-        for r in recept
-        for ing in r.get("ingredienser", [])
-        if (nyckel := (ing.get("namn") or "").lower().strip())
-    })
-    print(f"🔎 {len(unika)} unika ingredienser att matcha mot sortimentet")
+    # Beräkna sökterm-nyckeln EN gång per rått ingrediensnamn (billig regex) och
+    # dedupa den TUNGA fuzzy-matchningen på nyckeln, inte på råa namnet: 'mjölk',
+    # '2 dl mjölk' och '3 dl mjölk' rensar alla till samma _sök_termer → söks bara
+    # en gång (var tidigare tre identiska sökningar). Kandidaterna är identiska →
+    # ingen kvalitetsförändring, bara mindre arbete.
+    rånamn_till_nyckel: dict[str, tuple[str, ...]] = {}
+    for r in recept:
+        for ing in r.get("ingredienser", []):
+            rånamn = (ing.get("namn") or "").lower().strip()
+            if rånamn and rånamn not in rånamn_till_nyckel:
+                rånamn_till_nyckel[rånamn] = tuple(_sök_termer(rånamn))
+    unika = sorted(set(rånamn_till_nyckel.values()))
+    print(f"🔎 {len(unika)} unika söknycklar ({len(rånamn_till_nyckel)} råa namn) att matcha mot sortimentet")
 
     # Fuzzy-sökningen är GIL-bunden ren Python → parallellisera över processer.
     # Ladda katalogen EN gång i FÖRÄLDERN innan poolen skapas: på Linux forkar
@@ -301,17 +309,18 @@ def bygg_recept_index() -> int:
     ))
     storlek = max(1, math.ceil(len(unika) / arbetare))
     chunkar = [unika[i:i + storlek] for i in range(0, len(unika), storlek)]
-    cache: dict[str, list[dict]] = {}
+    cache: dict[tuple, list[dict]] = {}
     klar = 0
     with ProcessPoolExecutor(max_workers=arbetare) as pool:
         for delresultat in pool.map(_matcha_namn_chunk, chunkar):
             cache.update(delresultat)
             klar += len(delresultat)
-            print(f"   matchat {klar}/{len(unika)} unika ingredienser")
+            print(f"   matchat {klar}/{len(unika)} unika söknycklar")
 
     for r in recept:
         for ing in r.get("ingredienser", []):
-            kandidater = cache.get((ing.get("namn") or "").lower().strip()) or []
+            nyckel = rånamn_till_nyckel.get((ing.get("namn") or "").lower().strip())
+            kandidater = (cache.get(nyckel) or []) if nyckel is not None else []
             # Top-N kandidater så sökningen kan välja kampanjvaran; produkt_id/
             # match_score = top-1, kvar för bakåtkompatibilitet (äldre konsumenter).
             ing["produkt_kandidater"] = kandidater
