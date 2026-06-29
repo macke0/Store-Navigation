@@ -803,6 +803,21 @@ _ING_FILLER = re.compile(r"\b(?:ev|gärna|förslagsvis|t\s*ex)\b")
 _ING_KVALITETSORD = re.compile(r"\b(?:av|sorter|sorters|sort|sorts|slags?|typ(?:er)?)\b")
 # Alternativ-separatorer (eller/alt/alternativt//) → matcha varje för sig.
 _ALT_SEP = re.compile(r"\s+(?:eller|alt|alternativt)\s+|\s*/\s*")
+# Tillstånds-/beredningsord — en parentes som BARA listar sådana ('(färsk eller
+# torkad)', '(hel eller mald)') beskriver råvarans FORM, inte ett råvaru-alternativ.
+# Tas de med som söktermer översvämmar de kandidatsetet ('torkad'→Plommon Torkade
+# 107, 'färsk'→Räkor färska 107) och tränger ut den faktiska råvaran (salvia) ur
+# top-12. Filtreras därför bort i _parentes_alternativ.
+_TILLSTÅNDSORD = frozenset((
+    "färsk", "färska", "färskt", "torkad", "torkade", "torkat", "fryst", "frysta",
+    "fryststinad", "tinad", "tinade", "kokt", "kokta", "kokat", "rå", "råa", "rått",
+    "hel", "hela", "halv", "halva", "hackad", "hackade", "hackat", "finhackad",
+    "finhackade", "grovhackad", "grovhackade", "riven", "rivet", "rivna", "finriven",
+    "grovriven", "mald", "malen", "malet", "malda", "skivad", "skivade", "skivat",
+    "strimlad", "strimlade", "strimlat", "pressad", "pressade", "skalad", "skalade",
+    "skalat", "urkärnad", "urkärnade", "rökt", "rökta", "varmrökt", "kallrökt",
+    "stekt", "stekta", "kall", "kalla", "varm", "varma", "kyld", "kylda",
+))
 
 
 def _rensa_ingrediensnamn(namn: str) -> str:
@@ -840,8 +855,14 @@ def _parentes_alternativ(namn: str) -> list[str]:
         g = re.sub(r"\b(?:t\s*ex|tex|gärna|ca|ungefär|motsvarar)\b", " ", grupp)
         for del_ in re.split(r"\s*,\s*|" + _ALT_SEP.pattern, g):
             del_ = re.sub(r"[^a-zåäöéè\s]", " ", del_ or "").strip()
-            if del_ and del_ not in ut:
-                ut.append(del_)
+            if not del_ or del_ in ut:
+                continue
+            # Hoppa över rena tillstånds-/formparenteser ('(färsk eller torkad)') —
+            # de är ingen råvara utan översvämmar kandidatsetet med allt 'färskt'/
+            # 'torkat' och tränger ut den faktiska råvaran.
+            if all(o in _TILLSTÅNDSORD for o in del_.split()):
+                continue
+            ut.append(del_)
     return ut
 
 
