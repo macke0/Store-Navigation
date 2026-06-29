@@ -622,13 +622,18 @@ _AVLEDDA_KATEGORIER = (
 
 # Hela ICA-AVDELNINGAR (toppkategorin i sökvägen) som ALDRIG är en mat-ingrediens.
 # En råvara utan riktig katalogträff fuzzy-matchar annars skräp över _MIN_MATCH_SCORE
-# (sky→Mascara, kalvinnanlår→Kattmat, silverkulor→Ballong). Avdelning är en sluten
-# taxonomi → vetar generellt, inte per produkt. EXAKT-match (ej delsträng) eftersom
-# "Fisk & Skaldjur"/"Vegetariskt" är mat. Behåller medvetet Kök (folie/bakplåtspapper
-# matchar rätt), Grill, Träning & Återhämtning, Midsommar, Nyheter (mat/blandat).
+# (sky→Mascara, kalvinnanlår→Kattmat, tångcaviar→Tång GastroMax, silverkulor→
+# Serveringsfat). Avdelning är en sluten taxonomi → vetar generellt, inte per
+# produkt. EXAKT-match (ej delsträng) eftersom "Fisk & Skaldjur"/"Vegetariskt" är
+# mat. "Kök" = ENBART köksredskap/engångsartiklar/fest (Stekpannor, Stekspadar &
+# Tänger, Förvaringsburkar, Servetter, Ballonger, Tårtljus, Serveringsfat...) —
+# ingen ätbar vara (verifierat mot katalogens kategorilista; folie/bakplåtspapper
+# ligger under "Städ, Tvätt & Papper" som redan vetas). Behåller Grill, Träning &
+# Återhämtning, Midsommar, Nyheter (mat/blandat).
 _NONFOOD_AVDELNINGAR = frozenset({
     "Apotek, Hälsa & Skönhet", "Barn", "Blommor & Trädgård", "Djur", "Fritid",
-    "Hem & Inredning", "Kläder & Accessoarer", "Städ, Tvätt & Papper", "Tobak",
+    "Hem & Inredning", "Kläder & Accessoarer", "Kök", "Städ, Tvätt & Papper",
+    "Tobak",
 })
 
 
@@ -767,7 +772,13 @@ def _byt_till_kampanjvara(val: dict, sök, diet: str | None, ing_namn: str,
 # mängd/enhet/parentes/behållarord/alternativ — men INTE adjektiv/particip som kan
 # definiera en egen produkt (rostad lök, torkad lök, riven ost) → de lämnas orörda.
 _ING_PARENTES = re.compile(r"\([^)]*\)")
-_ING_TAL_ENHET = re.compile(r"\b\d+[\d.,/]*\s*(?:g|kg|hg|dl|cl|ml|l|msk|tsk|krm|st|pkt|förp)?\b")
+# Mått-/dimensionsbrus: "i bitar om 2x2 cm", "tärningar 1×1×1 cm", "10 x 10 cm".
+# Ett kvarvarande "cm"/"x"/"om" blir annars HUVUDORD (sista alfaordet) och drar
+# matchningen mot köksprylar ("högrev ... 2x2 cm" → Stekpanna "...28cm"). Tar
+# bort hela frasen inkl ev. inledande "om/à" så bara råvaran ("högrev") står kvar.
+_ING_DIMENSION = re.compile(
+    r"\b(?:om|á|à)?\s*\d+\s*[x×]\s*\d+(?:\s*[x×]\s*\d+)?\s*(?:mm|cm|dm|m)?\b")
+_ING_TAL_ENHET = re.compile(r"\b\d+[\d.,/]*\s*(?:g|kg|hg|dl|cl|ml|mm|cm|dm|l|msk|tsk|krm|st|pkt|förp)?\b")
 _ING_MÄNGDORD = re.compile(
     r"\b(?:à|ca|cirka|ungefär|drygt|knappt|förp|förpackning|paket|pkt|burk|burkar|"
     r"påse|påsar|knippe|knippen|bunt|buntar|nypa|stänk|skvätt)\b")
@@ -795,6 +806,7 @@ def _rensa_ingrediensnamn(namn: str) -> str:
     s = (namn or "").lower()
     s = _ING_PARENTES.sub(" ", s)
     s = _ING_TILL.sub(" ", s)
+    s = _ING_DIMENSION.sub(" ", s)
     s = _ING_TAL_ENHET.sub(" ", s)
     s = _ING_MÄNGDORD.sub(" ", s)
     s = _ING_KVALIFICERARE.sub(" ", s)
