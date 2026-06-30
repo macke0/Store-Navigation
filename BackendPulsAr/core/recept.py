@@ -115,6 +115,21 @@ _SKAFFERI = {
     "olja", "matolja", "neutral olja", "olja till stekning", "stekolja",
 }
 
+# Recept listar ibland KÖKSFÖRNÖDENHETER (ej livsmedel) eller varor som inte säljs
+# i livsmedelsbutik som "ingredienser": bakplåtspapper (recept skriver "smörpapper"),
+# grillspett ("grillpinnar"), brännvin (Systembolaget). Den RÄTTA varan ligger i en
+# non-food-avdelning som redan vetas bort (Städ/Tvätt/Papper, Kök) ELLER finns inte
+# alls → fuzzyn fastnar då på FEL livsmedel i en mat-avdelning (smörpapper→Smör,
+# grillpinnar→Grillkorv, brännvin→Brännvinsost) som avdelnings-vetot inte kan stoppa.
+# Behandla dem som skafferi → matchad:false ('Har du hemma') i stället för en pinsam
+# felmatchning. Inget en kund behöver lägga i sin matkorg.
+_EJ_LIVSMEDEL = {
+    "smörpapper", "bakplåtspapper", "bakpapper", "gräddpapper",
+    "grillpinnar", "grillpinne", "grillspett", "spett", "tandpetare",
+    "snöre", "steksnöre", "stektråd", "folie", "aluminiumfolie", "plastfolie",
+    "brännvin",
+}
+
 # En riktig måltid mättar. Recept med känt lågt energiinnehåll per portion är
 # tilltugg/tillbehör/små sallader (t.ex. grillade pimientos 216 kcal) — filtrera
 # bort dem när kunden vill ha mat (men inte när hen bett om efterrätt).
@@ -560,12 +575,16 @@ def _kampanjpoäng(besparing: float, ordinarie: float, kampanjer: int,
 
 def _är_skafferi(ing_namn: str) -> bool:
     """True om ingrediensen är en skafferivara (salt/peppar/vatten/olja/socker)
-    som inte ska matchas mot sortimentet — undviker skräpträffar + listbrus.
-    Kollar både rå- och rensat namn ('olja (till formen)' → 'olja')."""
+    eller en köksförnödenhet/icke-livsmedel (smörpapper/grillspett/brännvin) som
+    inte ska matchas mot sortimentet — undviker skräpträffar + listbrus och pinsamma
+    felmatchningar (smörpapper→Smör). EXAKT-match på rå/rensat namn ('olja (till
+    formen)' → 'olja') — INTE delsträng/huvudord, så riktiga rätter där ordet ingår
+    ('potatis i folie', 'kyckling spett', 'brännvinssill') aldrig fel-flaggas."""
     rå = (ing_namn or "").lower().strip()
-    if rå in _SKAFFERI:
+    if rå in _SKAFFERI or rå in _EJ_LIVSMEDEL:
         return True
-    return _rensa_ingrediensnamn(ing_namn) in _SKAFFERI
+    rensat = _rensa_ingrediensnamn(ing_namn)
+    return rensat in _SKAFFERI or rensat in _EJ_LIVSMEDEL
 
 
 def _produkt_strider_mot_diet(produkt: dict, diet: str | None) -> bool:
