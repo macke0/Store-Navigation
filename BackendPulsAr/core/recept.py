@@ -150,6 +150,16 @@ _MIN_KAMPANJANDEL = 0.10
 # Recept utan match_score (äldre index) släpps igenom oförändrat.
 _MIN_MATCH_SCORE = 55
 
+# En del råvaror FINNS inte i sortimentet (mangold, rå katrinplommon, sviskon). Då
+# fastnar fuzzyn på en OBESLÄKTAD vara som bara delar ett prefix/en bokstavsföljd
+# (mangoldskott→Mango dryck, katrinplommon→Knäckebröd Katrin). Kännetecken: den
+# valda produkten delar INGET helt ord med råvaran (täckning 0) OCH har den bara
+# som löst prefix/suffix (huvudord-poäng ≤ 1) OCH namnmatchen är svag (< golvet).
+# Äkta stavningsvarianter (granatäpplesirap→Granatäppelsirap ~88, citronsaft→Citron
+# ~85) ligger ÖVER golvet via difflib/prefix-tier → behålls. Då är 'finns ej i
+# sortimentet' (matchad:false) ärligare än en pinsam felmatch. Query-time, tunbar.
+_OBESLÄKTAD_GOLV = 78
+
 # Kampanj-preferensen (välj nedsatt kandidat) får BARA slå till bland kandidater
 # som är nästan lika bra namnmatch som den bästa — inom så här många poäng. Annars
 # vinner en nedsatt MEN sämre match (morot→morotskaka, potatis→potatismjöl).
@@ -1065,6 +1075,12 @@ def _matchad_produkt(ing: dict, sök, diet: str | None,
     # namnmatch (inom _KAMPANJ_MARGINAL) — annars skulle en nedsatt men sämre/fel
     # vara vinna (morot→morotskaka, ägg→äggvita).
     bäst_p, bäst_score, bäst_nyckel = rankade[0]
+    # Obesläktad skräpträff (råvaran finns inte i sortimentet): valda produkten
+    # delar inget helt ord (täckning 0), bara löst prefix/suffix (huvudord ≤ 1) och
+    # svag namnmatch → hellre matchad:false än mangoldskott→Mango dryck.
+    täckning, huvudpoäng = bäst_nyckel
+    if täckning == 0 and huvudpoäng <= 1 and bäst_score < _OBESLÄKTAD_GOLV:
+        return None
     val, val_besp = bäst_p, _aktuell_besparing(bäst_p)
     for p, score, nyckel in rankade[1:]:
         if nyckel < bäst_nyckel:
