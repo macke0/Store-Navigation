@@ -506,7 +506,7 @@ def _lokalisera_mot_karta(
     faiss.normalize_L2(query_mean)
     
     # Hitta top-k frames
-    k_frames = min(5, len(karta.frame_ids))
+    k_frames = min(8, len(karta.frame_ids))
     similarities, frame_indices = karta.frame_index.search(query_mean, k_frames)
     
     candidate_frame_ids = [int(karta.frame_ids[i]) for i in frame_indices[0]]
@@ -522,7 +522,8 @@ def _lokalisera_mot_karta(
     all_points_3d = []
     best_frame_matches = 0
     best_frame_id = None
-    
+    frame_träffar = []  # (fid, pts_2d, pts_3d) per kandidat-frame med >=6 3D-matcher
+
     if matcher is not None:
         # Hitta BÄSTA frame (mest matcher med 3D)
         print(f"   🔍 LightGlue: matchar {len(candidate_frame_ids)} frames...")
@@ -563,19 +564,31 @@ def _lokalisera_mot_karta(
                             pts_2d.append(query_kp[q_idx])
                             pts_3d.append(frame_data.points_3d[db_idx])
                     
+                    if len(pts_2d) >= 6:
+                        frame_träffar.append((fid, pts_2d, pts_3d))
                     if len(pts_2d) > best_frame_matches:
                         best_frame_matches = len(pts_2d)
                         best_frame_id = fid
-                        all_points_2d = pts_2d
-                        all_points_3d = pts_3d
                         
             except Exception as e:
                 if debug:
                     print(f"   LightGlue fel för frame {fid}: {e}")
                 continue
     
+        # Multi-frame-aggregering: slå ihop 3D-matcher från de starkaste
+        # kandidat-framesen (>= halva bästa antalet). Fler geometriska
+        # constraints → robustare & exaktare PnP; RANSAC gallrar bort de
+        # frames som matchat fel. Faller tillbaka på bara bästa framen om
+        # inget annat når tröskeln.
+        if frame_träffar:
+            tröskel = max(8, best_frame_matches // 2)
+            for _fid, _p2d, _p3d in frame_träffar:
+                if len(_p2d) >= tröskel:
+                    all_points_2d.extend(_p2d)
+                    all_points_3d.extend(_p3d)
+
     if matcher is not None:
-        print(f"   📊 Testade {frames_testade} frames, bästa: frame {best_frame_id} med {best_frame_matches} 3D-matcher")
+        print(f"   📊 Testade {frames_testade} frames, bästa: frame {best_frame_id} med {best_frame_matches} 3D-matcher, aggregerat {len(all_points_2d)} punkter")
     
     else:
         # Fallback: FAISS nearest neighbor (ratio test)
@@ -631,7 +644,7 @@ def _lokalisera_mot_karta(
     success, rvec, tvec, inliers = cv2.solvePnPRansac(
         points_3d, points_2d,
         camera_matrix, dist_coeffs,
-        reprojectionError=16.0,
+        reprojectionError=12.0,
         iterationsCount=2000,
         confidence=0.995,
         flags=cv2.SOLVEPNP_EPNP
