@@ -240,6 +240,124 @@ def konvertera_session(session_dir: Path) -> dict:
     }
 
 
+def _läs_glb(file_path: Path):
+    """Läs en binary glTF 2.0 (vårt _bygg_glb-format) → (positions, normals, indices).
+
+    Läser via accessors/bufferViews så det tål vår egen output oavsett offset-padding.
+    Returnerar (positions VEC3 f32, normals VEC3 f32|None, indices uint32).
+    """
+    data = file_path.read_bytes()
+    magic, ver, _length = struct.unpack_from("<III", data, 0)
+    if magic != 0x46546C67:
+        raise ValueError(f"{file_path.name}: ej glTF (magic {hex(magic)})")
+
+    off = 12
+    jlen, _jtype = struct.unpack_from("<II", data, off); off += 8
+    manifest = json.loads(data[off:off + jlen].decode("utf-8")); off += jlen
+    _blen, _btype = struct.unpack_from("<II", data, off); off += 8
+    bin_start = off  # BIN-chunkens data börjar här
+
+    accessors = manifest["accessors"]
+    views = manifest["bufferViews"]
+
+    _KOMP = {5126: (np.float32, 4), 5125: (np.uint32, 4), 5123: (np.uint16, 2)}
+    _ANTAL = {"SCALAR": 1, "VEC2": 2, "VEC3": 3, "VEC4": 4}
+
+    def _läs_accessor(idx: int):
+        acc = accessors[idx]
+        bv = views[acc["bufferView"]]
+        dtype, _sz = _KOMP[acc["componentType"]]
+        n = acc["count"] * _ANTAL[acc["type"]]
+        start = bin_start + bv.get("byteOffset", 0) + acc.get("byteOffset", 0)
+        arr = np.frombuffer(data, dtype=dtype, count=n, offset=start)
+        comps = _ANTAL[acc["type"]]
+        return arr.reshape(acc["count"], comps) if comps > 1 else arr
+
+    prim = manifest["meshes"][0]["primitives"][0]
+    attr = prim["attributes"]
+    positions = _läs_accessor(attr["POSITION"]).astype(np.float32)
+    normals = (_läs_accessor(attr["NORMAL"]).astype(np.float32)
+               if "NORMAL" in attr else None)
+    indices = _läs_accessor(prim["indices"]).astype(np.uint32)
+    return positions, normals, indices
+
+
+def konvertera_alla_sessioner(butik_dir: Path, out_path: Path | None = None) -> dict:
+    """
+    Slå ihop mesh.glb från ALLA sessioner → en gemensam mesh_merged.glb.
+
+    Alla sessioner ligger redan i samma kart-frame (positioner == transform ==
+    kartkoordinater), så meshar kan konkateneras direkt utan per-session-transform.
+    Detta fyller hål vid omskanning: nya sessioner adderar geometri i samma frame.
+
+    Cache: om out_path finns och är nyare än alla sessioners mesh.glb → återanvänd.
+    """
+    butik_dir = Path(butik_dir)
+    sessioner_dir = butik_dir / "sessioner"
+    if not sessioner_dir.exists():
+        raise FileNotFoundError(f"Ingen sessioner-mapp i {butik_dir}")
+
+    if out_path is None:
+        out_path = butik_dir / "mesh_merged.glb"
+    out_path = Path(out_path)
+
+    glb_files: list[Path] = []
+    for sd in sorted(sessioner_dir.iterdir()):
+        if sd.is_dir() and (sd / "mesh.glb").exists():
+            glb_files.append(sd / "mesh.glb")
+    if not glb_files:
+        raise ValueError(f"Inga mesh.glb i någon session under {sessioner_dir}")
+
+    # Cache-check: hoppa ombygge om merged är färskare än alla sessioners mesh.glb.
+    # (Undvik att räkna in vår egen merged-fil om den råkar ligga i sessioner.)
+    if out_path.exists():
+        senaste = max(gf.stat().st_mtime for gf in glb_files)
+        if out_path.stat().st_mtime >= senaste:
+            return {"fil": str(out_path), "cache": True, "antal_sessioner": len(glb_files)}
+
+    all_pos = []
+    all_norm = []
+    all_idx = []
+    idx_offset = 0
+    skippade = []
+
+    for gf in glb_files:
+        try:
+            pos, norm, idx = _läs_glb(gf)
+        except Exception as e:
+            skippade.append(f"{gf.parent.name}: {e}")
+            continue
+        if norm is None:
+            norm = np.zeros_like(pos)
+        all_pos.append(pos)
+        all_norm.append(norm)
+        all_idx.append(idx.reshape(-1, 3) + idx_offset if idx.ndim == 1 else idx + idx_offset)
+        idx_offset += len(pos)
+
+    if not all_pos:
+        raise RuntimeError(f"Alla mesh.glb kunde inte parsas. Fel: {skippade}")
+
+    positions = np.concatenate(all_pos, axis=0)
+    normals = np.concatenate(all_norm, axis=0)
+    indices = np.concatenate(all_idx, axis=0)
+
+    storlek = _bygg_glb(positions, normals, indices, out_path)
+
+    return {
+        "fil": str(out_path),
+        "cache": False,
+        "storlek_mb": round(storlek / (1024 * 1024), 2),
+        "antal_sessioner": len(glb_files),
+        "antal_sessioner_ok": len(all_pos),
+        "antal_skippade": len(skippade),
+        "skippade": skippade,
+        "antal_vertices": int(len(positions)),
+        "antal_trianglar": int(len(indices)),
+        "bbox_min": positions.min(axis=0).tolist(),
+        "bbox_max": positions.max(axis=0).tolist(),
+    }
+
+
 # CLI: kör direkt på en sessionsmapp
 if __name__ == "__main__":
     import sys

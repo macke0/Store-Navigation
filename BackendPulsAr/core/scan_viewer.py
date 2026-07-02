@@ -484,13 +484,17 @@ laddaSkanningar();
 """
 
 @router.get("/viewer/mesh")
-async def viewer_mesh(karta: str = "hela_butiken", session: str | None = None):
-    """Returnera senaste mesh.glb (eller en specifik session).
+async def viewer_mesh(karta: str = "hela_butiken", session: str | None = None,
+                      merged: bool = True):
+    """Returnera mesh.glb för visning.
 
     - karta: just nu informativ; vi söker i alla sessioner.
       Senare kan vi koppla karta → sessioner via metadata.
     - session: explicit session-namn (t.ex. session_1777545535).
-      Om null tas senaste mesh.glb (efter mtime).
+      Om satt serveras BARA den sessionens mesh (merged ignoreras).
+    - merged: default True → slå ihop ALLA sessioners mesh till en gemensam
+      mesh (alla ligger redan i samma kart-frame) så hål fylls vid omskanning.
+      Sätt merged=false för att falla tillbaka på senaste enskilda mesh.glb.
     """
     sessioner_dir = BUTIK_DIR / "sessioner"
     if not sessioner_dir.exists():
@@ -502,6 +506,19 @@ async def viewer_mesh(karta: str = "hela_butiken", session: str | None = None):
             return {"fel": f"mesh.glb saknas för {session}"}
         return FileResponse(str(mp), media_type="model/gltf-binary",
                             filename=f"{session}.glb")
+
+    if merged:
+        try:
+            from core.mesh_converter import konvertera_alla_sessioner
+            res = konvertera_alla_sessioner(BUTIK_DIR)
+            merged_path = Path(res["fil"])
+            if merged_path.exists():
+                return FileResponse(str(merged_path),
+                                    media_type="model/gltf-binary",
+                                    filename="mesh_merged.glb")
+        except Exception:
+            # Faller tillbaka till senaste enskilda mesh nedan.
+            pass
 
     # Hitta senaste mesh.glb
     candidates: list[tuple[float, Path]] = []
