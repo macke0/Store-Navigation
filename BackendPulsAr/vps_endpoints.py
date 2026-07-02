@@ -770,6 +770,25 @@ def setup_vps_routes(app: FastAPI):
         except _np.linalg.LinAlgError:
             raise HTTPException(status_code=400, detail="Singulär ARKit-transform")
 
+        # LÅS ROTATIONEN TILL REN YAW (kritiskt mot höjd-drift).
+        # Kartvärlden är byggd från ARKit-LiDAR och telefonens live-ARKit-värld
+        # är också gravitations-riktad → BÅDA har Y = upp. Relationen mellan två
+        # gravitations-riktade världar är per definition en ren rotation runt Y
+        # + translation, ALDRIG en lutning. PnP-rotationen har dock pitch/roll-
+        # brus (plana hyllscener, förvärrat av multi-frame-aggregeringen) → utan
+        # denna projektion lutar T_ak och framåtgång läcker in i höjdled →
+        # pricken sjunker genom golvet. Extrahera yaw och bygg om rotationen som
+        # ren Ry(yaw); förankra positionen exakt vid lokaliseringsögonblicket.
+        R_ak = T_arkit_till_karta[:3, :3]
+        yaw_ak = _np.arctan2(R_ak[0, 2] - R_ak[2, 0], R_ak[0, 0] + R_ak[2, 2])
+        c, s = _np.cos(yaw_ak), _np.sin(yaw_ak)
+        R_yaw = _np.array([[c, 0.0, s], [0.0, 1.0, 0.0], [-s, 0.0, c]])
+        cam_arkit0 = T_arkit_camera[:3, 3]
+        T_ren = _np.eye(4)
+        T_ren[:3, :3] = R_yaw
+        T_ren[:3, 3] = _np.array([x, y, z]) - R_yaw @ cam_arkit0
+        T_arkit_till_karta = T_ren
+
         # Returnera column-major flat (samma format som iOS använder)
         flat = T_arkit_till_karta.T.reshape(-1).tolist()
 
