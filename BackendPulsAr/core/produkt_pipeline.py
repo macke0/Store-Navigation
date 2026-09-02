@@ -36,11 +36,10 @@ class ProduktPipeline:
             self.ica_produkter = json.load(f)
         self.ica_namn = {p['id']: p for p in self.ica_produkter}
         
-        # Bygg sökindex — bara produktnamn, inte kategori
-        self.sök_index = []
-        for p in self.ica_produkter:
-            sökbar = p.get('namn', '').lower()
-            self.sök_index.append((sökbar, p))
+        # Återanvänd den finkalibrerade sökmotorn (huvudord/täckning/difflib-golv +
+        # non-food/avledd-form-veto) i stället för en svag egen WRatio-matchning.
+        from core.produkt_sok import get_produkt_sök
+        self.sök_motor = get_produkt_sök(ica_produkter_path)
         
         # 3D-punkter per frame
         self.punkter_per_frame: Dict[int, List[dict]] = {}
@@ -416,40 +415,32 @@ class ProduktPipeline:
     # ─────────────────────────────────────────────
     
     def _fuzzy_match(self, qwen_namn: str, min_score: int = 70) -> Optional[dict]:
-        """Matcha Qwen-svar mot ICA-produkter."""
-        from rapidfuzz import fuzz, process
-        
-        q = qwen_namn.lower().strip()
-        
-        # Exakt match först
-        for sökbar, prod in self.sök_index:
-            if q in sökbar:
-                return {
-                    "kanoniskt_namn": prod.get("namn", ""),
-                    "varumarke": prod.get("varumarke", ""),
-                    "kategori": prod.get("kategori", ""),
-                    "id": prod.get("id", ""),
-                    "bild_url": prod.get("bild_url", ""),
-                    "score": 100,
-                }
-        
-        # Fuzzy match — partial_ratio funkar bättre för förkortningar (LÄTTMAJO → Lättmajonnäs)
-        sökbara = [s for s, _ in self.sök_index]
-        match = process.extractOne(q, sökbara, scorer=fuzz.WRatio)
-        
-        if match and match[1] >= min_score:
-            idx = sökbara.index(match[0])
-            prod = self.sök_index[idx][1]
-            return {
-                "kanoniskt_namn": prod.get("namn", ""),
-                "varumarke": prod.get("varumarke", ""),
-                "kategori": prod.get("kategori", ""),
-                "id": prod.get("id", ""),
-                "bild_url": prod.get("bild_url", ""),
-                "score": match[1],
-            }
-        
-        return None
+        """Matcha Qwen-svar mot ICA-katalogen via den delade sökmotorn.
+
+        Sökmotorn (produkt_sok.ProduktSök) bär hela finkalibreringen: huvudord-/
+        täckningspoäng, difflib-golv för stavningsvarianter, samt non-food- och
+        avledd-form-veto → mycket bättre än en rå WRatio-matchning.
+        """
+        if not qwen_namn or not qwen_namn.strip():
+            return None
+
+        träffar = self.sök_motor.sök(qwen_namn, 1)
+        if not träffar:
+            return None
+
+        prod = träffar[0]
+        score = prod.get("match_score", 0)
+        if score < min_score:
+            return None
+
+        return {
+            "kanoniskt_namn": prod.get("namn", ""),
+            "varumarke": prod.get("varumarke", ""),
+            "kategori": prod.get("kategori", ""),
+            "id": prod.get("id", ""),
+            "bild_url": prod.get("bild_url", ""),
+            "score": score,
+        }
     
     # ─────────────────────────────────────────────
     # STEG 2: VOTING + SPARA
